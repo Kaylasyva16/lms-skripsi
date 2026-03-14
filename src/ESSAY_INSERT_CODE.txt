@@ -1,0 +1,39 @@
+// TEMPORARY FILE - ESSAY RENDERING CODE TO INSERT
+// INSERT THIS AFTER LINE 1863 in QuizPage.tsx (after the simulation closing })
+
+              {/* Essay */}
+              {currentQ.type === 'essay' && (
+                <div className="space-y-4">
+                  <div className="bg-gradient-to-r from-amber-50 to-yellow-50 rounded-lg p-4 border border-amber-200">
+                    <p className="text-sm text-gray-600 flex items-center gap-2">
+                      <Code2 className="w-4 h-4 text-amber-500" />
+                      Tulis jawaban Anda dengan lengkap dan jelas. Sertakan contoh kode jika diminta.
+                    </p>
+                    {currentQ.minWords && (
+                      <p className="text-xs text-gray-500 mt-1">
+                        Minimal {currentQ.minWords} kata
+                      </p>
+                    )}
+                  </div>
+
+                  <Textarea
+                    value={answers[currentQ.id] || ''}
+                    onChange={(e) => handleAnswerChange(currentQ.id, e.target.value)}
+                    placeholder="Tulis jawaban Anda di sini... Jelaskan dengan detail dan sertakan contoh jika diperlukan."
+                    className="min-h-[250px] resize-none text-gray-700"
+                  />
+
+                  <div className="flex items-center justify-between text-sm text-gray-600">
+                    <p>
+                      {currentQ.minWords && (
+                        <>Minimal {currentQ.minWords} kata diperlukan</>
+                      )}
+                    </p>
+                    <p>
+                      {answers[currentQ.id] 
+                        ? `${answers[currentQ.id].trim().split(/\s+/).filter(w => w.length > 0).length} kata`
+                        : '0 kata'}
+                    </p>
+                  </div>
+                </div>
+              )}

@@ -1,0 +1,98 @@
+<template>
+  <div class="min-h-screen bg-gray-50">
+    <!-- Navigation -->
+    <nav class="bg-white border-b border-gray-200 px-6 py-4">
+      <div class="flex items-center justify-between">
+        <h1 class="text-xl font-semibold text-gray-900">LMS PjBL - Vue 3</h1>
+        <div class="flex gap-4">
+          <button
+            @click="currentPage = 'project'"
+            :class="[
+              'px-4 py-2 rounded-lg transition-colors',
+              currentPage === 'project'
+                ? 'bg-blue-500 text-white'
+                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+            ]"
+          >
+            Project Detail
+          </button>
+          <button
+            @click="currentPage = 'debugging'"
+            :class="[
+              'px-4 py-2 rounded-lg transition-colors',
+              currentPage === 'debugging'
+                ? 'bg-blue-500 text-white'
+                : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+            ]"
+          >
+            Debugging Puzzle
+          </button>
+        </div>
+      </div>
+    </nav>
+
+    <!-- Content -->
+    <main class="container mx-auto px-6 py-8">
+      <!-- Project Detail Page -->
+      <ProjectDetailPage
+        v-if="currentPage === 'project'"
+        :on-close="handleClose"
+      />
+
+      <!-- Debugging Puzzle Page -->
+      <DebuggingPuzzlePage
+        v-if="currentPage === 'debugging'"
+        :on-close="handleClose"
+      />
+
+      <!-- Home Page -->
+      <div v-if="currentPage === 'home'" class="text-center py-20">
+        <h2 class="text-3xl font-bold text-gray-900 mb-4">
+          Welcome to LMS PjBL Vue 3
+        </h2>
+        <p class="text-lg text-gray-600 mb-8">
+          Learning Management System berbasis Project-Based Learning
+        </p>
+        <div class="flex gap-4 justify-center">
+          <button
+            @click="currentPage = 'project'"
+            class="px-6 py-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors"
+          >
+            View Project Detail
+          </button>
+          <button
+            @click="currentPage = 'debugging'"
+            class="px-6 py-3 bg-green-500 text-white rounded-lg hover:bg-green-600 transition-colors"
+          >
+            Try Debugging Puzzle
+          </button>
+        </div>
+      </div>
+    </main>
+
+    <!-- Footer -->
+    <footer class="bg-white border-t border-gray-200 px-6 py-4 mt-20">
+      <div class="container mx-auto text-center text-sm text-gray-600">
+        <p>LMS PjBL © 2024 - Built with Vue 3, TypeScript & Tailwind CSS</p>
+      </div>
+    </footer>
+  </div>
+</template>
+
+<script setup lang="ts">
+import { ref } from 'vue';
+import ProjectDetailPage from './ProjectDetailPage.vue';
+import DebuggingPuzzlePage from './DebuggingPuzzlePage.vue';
+
+// Current page state
+const currentPage = ref<'home' | 'project' | 'debugging'>('home');
+
+// Handlers
+const handleClose = () => {
+  currentPage.value = 'home';
+};
+</script>
+
+<style>
+/* Add any global styles here */
+</style>
