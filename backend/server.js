@@ -434,7 +434,28 @@ app.get("/api/courses/:id/modules", async (req, res) => {
       [courseId, siswaId]
     );
 
-    res.json(result.rows);
+    const modules = result.rows.map((row) => {
+      let parsedTopics = [];
+
+      try {
+        if (Array.isArray(row.topics)) {
+          parsedTopics = row.topics;
+        } else if (typeof row.topics === "string") {
+          parsedTopics = JSON.parse(row.topics);
+        } else if (row.topics) {
+          parsedTopics = row.topics;
+        }
+      } catch (e) {
+        parsedTopics = [];
+      }
+
+      return {
+        ...row,
+        topics: Array.isArray(parsedTopics) ? parsedTopics : [],
+      };
+    });
+
+    res.json(modules);
   } catch (err) {
     console.error("ERROR GET MODULES:", err);
     res.status(500).json({ error: err.message });
@@ -952,6 +973,670 @@ app.get("/me", authenticateToken, async (req, res) => {
 
     res.json(result.rows[0]);
   } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/* ================= QUIZ ================= */
+
+// GET semua quiz milik guru
+app.get("/api/quizzes", authenticateToken, authorizeRole(["guru"]), async (req, res) => {
+  try {
+    const result = await pool.query(
+      `
+      SELECT 
+        q.id,
+        q.title,
+        q.kelas,
+        q.description,
+        q.total_questions AS "totalQuestions",
+        q.duration,
+        q.question_types AS "questionTypes",
+        q.status,
+        q.created_at AS "createdAt",
+        0 AS submissions,
+        0 AS "averageScore"
+      FROM quizzes q
+      WHERE q.created_by = $1
+      ORDER BY q.created_at DESC
+      `,
+      [req.user.id]
+    );
+
+    res.json(result.rows);
+  } catch (err) {
+    console.error("GET QUIZZES ERROR:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/api/quizzes", authenticateToken, authorizeRole(["guru"]), async (req, res) => {
+  try {
+    const { title, kelas, description, totalQuestions, duration, questionTypes, status } = req.body;
+
+    const result = await pool.query(
+      `
+      INSERT INTO quizzes
+      (title, kelas, description, total_questions, duration, question_types, status, created_by)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+      RETURNING
+        id,
+        title,
+        kelas,
+        description,
+        total_questions AS "totalQuestions",
+        duration,
+        question_types AS "questionTypes",
+        status,
+        created_at AS "createdAt",
+        0 AS submissions,
+        0 AS "averageScore"
+      `,
+      [title, kelas, description, totalQuestions, duration, JSON.stringify(questionTypes || []), status || "draft", req.user.id]
+    );
+
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error("CREATE QUIZ ERROR:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put("/api/quizzes/:id", authenticateToken, authorizeRole(["guru"]), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { title, kelas, description, totalQuestions, duration, questionTypes, status } = req.body;
+
+    const result = await pool.query(
+      `
+      UPDATE quizzes
+      SET title = $1,
+          kelas = $2,
+          description = $3,
+          total_questions = $4,
+          duration = $5,
+          question_types = $6,
+          status = $7
+      WHERE id = $8
+      AND created_by = $9
+      RETURNING
+        id,
+        title,
+        kelas,
+        description,
+        total_questions AS "totalQuestions",
+        duration,
+        question_types AS "questionTypes",
+        status,
+        created_at AS "createdAt",
+        0 AS submissions,
+        0 AS "averageScore"
+      `,
+      [title, kelas, description, totalQuestions, duration, JSON.stringify(questionTypes || []), status, id, req.user.id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ message: "Quiz tidak ditemukan" });
+    }
+
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error("UPDATE QUIZ ERROR:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete("/api/quizzes/:id", authenticateToken, authorizeRole(["guru"]), async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const result = await pool.query(
+      `
+      DELETE FROM quizzes
+      WHERE id = $1
+      AND created_by = $2
+      RETURNING id
+      `,
+      [id, req.user.id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ message: "Quiz tidak ditemukan" });
+    }
+
+    res.json({ message: "Quiz berhasil dihapus" });
+  } catch (err) {
+    console.error("DELETE QUIZ ERROR:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/api/quizzes/:id/duplicate", authenticateToken, authorizeRole(["guru"]), async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const quiz = await pool.query("SELECT * FROM quizzes WHERE id = $1 AND created_by = $2", [id, req.user.id]);
+
+    if (quiz.rows.length === 0) {
+      return res.status(404).json({ message: "Quiz tidak ditemukan" });
+    }
+
+    const q = quiz.rows[0];
+
+    const result = await pool.query(
+      `
+      INSERT INTO quizzes
+      (title, kelas, description, total_questions, duration, question_types, status, created_by)
+      VALUES ($1,$2,$3,$4,$5,$6,'draft',$7)
+      RETURNING
+        id,
+        title,
+        kelas,
+        description,
+        total_questions AS "totalQuestions",
+        duration,
+        question_types AS "questionTypes",
+        status,
+        created_at AS "createdAt",
+        0 AS submissions,
+        0 AS "averageScore"
+      `,
+      [q.title + " (Copy)", q.kelas, q.description, q.total_questions, q.duration, q.question_types, req.user.id]
+    );
+
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error("DUPLICATE QUIZ ERROR:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// QUIZ QUESTIONS //
+app.get("/api/quizzes/:quizId/questions", authenticateToken, authorizeRole(["guru"]), async (req, res) => {
+  try {
+    const { quizId } = req.params;
+
+    const quizCheck = await pool.query("SELECT * FROM quizzes WHERE id = $1 AND created_by = $2", [quizId, req.user.id]);
+
+    if (quizCheck.rows.length === 0) {
+      return res.status(404).json({ message: "Quiz tidak ditemukan" });
+    }
+
+    const questionResult = await pool.query(
+      `
+      SELECT
+        id,
+        quiz_id AS "quizId",
+        question_order AS "questionOrder",
+        type,
+        question_text AS "questionText",
+        explanation,
+        points,
+        payload
+      FROM quiz_questions
+      WHERE quiz_id = $1
+      ORDER BY question_order ASC
+      `,
+      [quizId]
+    );
+
+    const questions = questionResult.rows;
+
+    for (const question of questions) {
+      if (question.type === "multiple-choice") {
+        const optionResult = await pool.query(
+          `
+          SELECT
+            id,
+            option_order AS "optionOrder",
+            option_text AS "optionText",
+            is_correct AS "isCorrect"
+          FROM quiz_options
+          WHERE question_id = $1
+          ORDER BY option_order ASC
+          `,
+          [question.id]
+        );
+
+        question.options = optionResult.rows;
+      } else {
+        question.options = [];
+      }
+    }
+
+    res.json(questions);
+  } catch (err) {
+    console.error("GET QUESTIONS ERROR:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/api/quizzes/:quizId/questions", authenticateToken, authorizeRole(["guru"]), async (req, res) => {
+  const client = await pool.connect();
+
+  try {
+    const { quizId } = req.params;
+    const { type, questionText, explanation, points, payload, options } = req.body;
+
+    await client.query("BEGIN");
+
+    const quizCheck = await client.query("SELECT * FROM quizzes WHERE id = $1 AND created_by = $2", [quizId, req.user.id]);
+
+    if (quizCheck.rows.length === 0) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ message: "Quiz tidak ditemukan" });
+    }
+
+    const orderResult = await client.query(
+      `
+      SELECT COALESCE(MAX(question_order), 0) + 1 AS next_order
+      FROM quiz_questions
+      WHERE quiz_id = $1
+      `,
+      [quizId]
+    );
+
+    const nextOrder = orderResult.rows[0].next_order;
+
+    const questionResult = await client.query(
+      `
+      INSERT INTO quiz_questions
+      (quiz_id, question_order, type, question_text, explanation, points, payload)
+      VALUES ($1,$2,$3,$4,$5,$6,$7)
+      RETURNING
+        id,
+        quiz_id AS "quizId",
+        question_order AS "questionOrder",
+        type,
+        question_text AS "questionText",
+        explanation,
+        points,
+        payload
+      `,
+      [quizId, nextOrder, type, questionText, explanation || null, points || 10, JSON.stringify(payload || {})]
+    );
+
+    const question = questionResult.rows[0];
+
+    if (type === "multiple-choice" && Array.isArray(options)) {
+      for (let i = 0; i < options.length; i++) {
+        const option = options[i];
+
+        await client.query(
+          `
+          INSERT INTO quiz_options
+          (question_id, option_order, option_text, is_correct)
+          VALUES ($1,$2,$3,$4)
+          `,
+          [question.id, i + 1, option.optionText, option.isCorrect]
+        );
+      }
+    }
+
+    await client.query(
+      `
+      UPDATE quizzes
+      SET total_questions = (
+        SELECT COUNT(*) FROM quiz_questions WHERE quiz_id = $1
+      )
+      WHERE id = $1
+      `,
+      [quizId]
+    );
+
+    await client.query("COMMIT");
+    res.status(201).json(question);
+  } catch (err) {
+    await client.query("ROLLBACK");
+    console.error("CREATE QUESTION ERROR:", err);
+    res.status(500).json({ error: err.message });
+  } finally {
+    client.release();
+  }
+});
+
+app.put("/api/questions/:id", authenticateToken, authorizeRole(["guru"]), async (req, res) => {
+  const client = await pool.connect();
+
+  try {
+    const { id } = req.params;
+    const { type, questionText, explanation, points, payload, options } = req.body;
+
+    await client.query("BEGIN");
+
+    const checkResult = await client.query(
+      `
+      SELECT q.*, quiz.created_by
+      FROM quiz_questions q
+      JOIN quizzes quiz ON quiz.id = q.quiz_id
+      WHERE q.id = $1 AND quiz.created_by = $2
+      `,
+      [id, req.user.id]
+    );
+
+    if (checkResult.rows.length === 0) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ message: "Soal tidak ditemukan" });
+    }
+
+    const question = checkResult.rows[0];
+
+    const updateResult = await client.query(
+      `
+      UPDATE quiz_questions
+      SET type = $1,
+          question_text = $2,
+          explanation = $3,
+          points = $4,
+          payload = $5
+      WHERE id = $6
+      RETURNING
+        id,
+        quiz_id AS "quizId",
+        question_order AS "questionOrder",
+        type,
+        question_text AS "questionText",
+        explanation,
+        points,
+        payload
+      `,
+      [type, questionText, explanation || null, points || 10, JSON.stringify(payload || {}), id]
+    );
+
+    await client.query("DELETE FROM quiz_options WHERE question_id = $1", [id]);
+
+    if (type === "multiple-choice" && Array.isArray(options)) {
+      for (let i = 0; i < options.length; i++) {
+        const option = options[i];
+
+        await client.query(
+          `
+          INSERT INTO quiz_options
+          (question_id, option_order, option_text, is_correct)
+          VALUES ($1,$2,$3,$4)
+          `,
+          [id, i + 1, option.optionText, option.isCorrect]
+        );
+      }
+    }
+
+    await client.query("COMMIT");
+    res.json(updateResult.rows[0]);
+  } catch (err) {
+    await client.query("ROLLBACK");
+    console.error("UPDATE QUESTION ERROR:", err);
+    res.status(500).json({ error: err.message });
+  } finally {
+    client.release();
+  }
+});
+
+app.delete("/api/questions/:id", authenticateToken, authorizeRole(["guru"]), async (req, res) => {
+  const client = await pool.connect();
+
+  try {
+    const { id } = req.params;
+
+    await client.query("BEGIN");
+
+    const checkResult = await client.query(
+      `
+      SELECT q.*, quiz.created_by
+      FROM quiz_questions q
+      JOIN quizzes quiz ON quiz.id = q.quiz_id
+      WHERE q.id = $1 AND quiz.created_by = $2
+      `,
+      [id, req.user.id]
+    );
+
+    if (checkResult.rows.length === 0) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ message: "Soal tidak ditemukan" });
+    }
+
+    const quizId = checkResult.rows[0].quiz_id;
+
+    await client.query("DELETE FROM quiz_questions WHERE id = $1", [id]);
+
+    await client.query(
+      `
+      UPDATE quizzes
+      SET total_questions = (
+        SELECT COUNT(*) FROM quiz_questions WHERE quiz_id = $1
+      )
+      WHERE id = $1
+      `,
+      [quizId]
+    );
+
+    await client.query("COMMIT");
+
+    res.json({ message: "Soal berhasil dihapus" });
+  } catch (err) {
+    await client.query("ROLLBACK");
+    console.error("DELETE QUESTION ERROR:", err);
+    res.status(500).json({ error: err.message });
+  } finally {
+    client.release();
+  }
+});
+
+/* ================= QUIZ SISWA ================= */
+app.get("/api/student/quizzes", authenticateToken, authorizeRole(["siswa"]), async (req, res) => {
+  try {
+    const userResult = await pool.query(
+      `
+      SELECT id, nama, kelas
+      FROM users
+      WHERE id = $1 AND role = 'siswa'
+      `,
+      [req.user.id]
+    );
+
+    if (userResult.rows.length === 0) {
+      return res.status(404).json({ message: "Siswa tidak ditemukan" });
+    }
+
+    const siswa = userResult.rows[0];
+
+    const result = await pool.query(
+      `
+      SELECT
+        q.id,
+        q.title,
+        q.kelas,
+        q.description,
+        q.total_questions AS "totalQuestions",
+        q.duration,
+        q.question_types AS "questionTypes",
+        q.status,
+        q.created_at AS "createdAt"
+      FROM quizzes q
+      WHERE q.status = 'published'
+      AND q.kelas = $1
+      ORDER BY q.created_at DESC
+      `,
+      [siswa.kelas]
+    );
+
+    const quizzes = result.rows.map((quiz) => {
+      let parsedTypes = [];
+
+      try {
+        if (Array.isArray(quiz.questionTypes)) {
+          parsedTypes = quiz.questionTypes;
+        } else if (typeof quiz.questionTypes === "string") {
+          parsedTypes = JSON.parse(quiz.questionTypes);
+        }
+      } catch (e) {
+        parsedTypes = [];
+      }
+
+      return {
+        ...quiz,
+        questionTypes: parsedTypes,
+        type: parsedTypes[0] || "multiple-choice",
+        level: "Beginner",
+        icon: "📝",
+        score: null,
+      };
+    });
+
+    res.json(quizzes);
+  } catch (err) {
+    console.error("GET STUDENT QUIZZES ERROR:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get("/api/student/quizzes/:id", authenticateToken, authorizeRole(["siswa"]), async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const userResult = await pool.query(
+      `
+      SELECT id, kelas
+      FROM users
+      WHERE id = $1 AND role = 'siswa'
+      `,
+      [req.user.id]
+    );
+
+    if (userResult.rows.length === 0) {
+      return res.status(404).json({ message: "Siswa tidak ditemukan" });
+    }
+
+    const siswa = userResult.rows[0];
+
+    const result = await pool.query(
+      `
+      SELECT
+        q.id,
+        q.title,
+        q.kelas,
+        q.description,
+        q.total_questions AS "totalQuestions",
+        q.duration,
+        q.question_types AS "questionTypes",
+        q.status,
+        q.created_at AS "createdAt"
+      FROM quizzes q
+      WHERE q.id = $1
+      AND q.status = 'published'
+      AND q.kelas = $2
+      `,
+      [id, siswa.kelas]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ message: "Quiz tidak ditemukan atau tidak bisa diakses" });
+    }
+
+    const quiz = result.rows[0];
+
+    let parsedTypes = [];
+    try {
+      if (Array.isArray(quiz.questionTypes)) {
+        parsedTypes = quiz.questionTypes;
+      } else if (typeof quiz.questionTypes === "string") {
+        parsedTypes = JSON.parse(quiz.questionTypes);
+      }
+    } catch (e) {
+      parsedTypes = [];
+    }
+
+    res.json({
+      ...quiz,
+      questionTypes: parsedTypes,
+      type: parsedTypes[0] || "multiple-choice",
+      level: "Beginner",
+      icon: "📝",
+    });
+  } catch (err) {
+    console.error("GET STUDENT QUIZ DETAIL ERROR:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.get("/api/student/quizzes/:quizId/questions", authenticateToken, authorizeRole(["siswa"]), async (req, res) => {
+  try {
+    const { quizId } = req.params;
+
+    const userResult = await pool.query(
+      `
+      SELECT id, kelas
+      FROM users
+      WHERE id = $1 AND role = 'siswa'
+      `,
+      [req.user.id]
+    );
+
+    if (userResult.rows.length === 0) {
+      return res.status(404).json({ message: "Siswa tidak ditemukan" });
+    }
+
+    const siswa = userResult.rows[0];
+
+    const quizCheck = await pool.query(
+      `
+      SELECT *
+      FROM quizzes
+      WHERE id = $1
+      AND status = 'published'
+      AND kelas = $2
+      `,
+      [quizId, siswa.kelas]
+    );
+
+    if (quizCheck.rows.length === 0) {
+      return res.status(404).json({ message: "Quiz tidak ditemukan atau tidak bisa diakses" });
+    }
+
+    const questionResult = await pool.query(
+      `
+      SELECT
+        id,
+        quiz_id AS "quizId",
+        question_order AS "questionOrder",
+        type,
+        question_text AS "questionText",
+        explanation,
+        points,
+        payload
+      FROM quiz_questions
+      WHERE quiz_id = $1
+      ORDER BY question_order ASC
+      `,
+      [quizId]
+    );
+
+    const questions = questionResult.rows;
+
+    for (const question of questions) {
+      if (question.type === "multiple-choice") {
+        const optionResult = await pool.query(
+          `
+          SELECT
+          id,
+          option_order AS "optionOrder",
+          option_text AS "optionText",
+          is_correct AS "isCorrect"
+        FROM quiz_options
+        WHERE question_id = $1
+        ORDER BY option_order ASC
+          `,
+          [question.id]
+        );
+
+        question.options = optionResult.rows;
+      } else {
+        question.options = [];
+      }
+    }
+
+    res.json(questions);
+  } catch (err) {
+    console.error("GET STUDENT QUIZ QUESTIONS ERROR:", err);
     res.status(500).json({ error: err.message });
   }
 });

@@ -14,6 +14,7 @@ type Lesson = {
   duration: string;
   completed: boolean;
   file_url?: string;
+  url?: string;
   pdfInfo?: {
     fileName: string;
     fileSize: string;
@@ -46,6 +47,16 @@ export function LessonContentPage({ moduleId, onClose }: LessonContentPageProps)
 
   console.log("MODULE ID:", moduleId);
 
+  // helper untuk menentukan source video / file
+  const getMediaSrc = (lesson: Lesson | null) => {
+    if (!lesson) return "";
+
+    if (lesson.url) return lesson.url;
+    if (lesson.file_url) return `http://localhost:5000/uploads/${lesson.file_url}`;
+
+    return "";
+  };
+
   useEffect(() => {
     if (!moduleId) return;
 
@@ -61,6 +72,7 @@ export function LessonContentPage({ moduleId, onClose }: LessonContentPageProps)
           type: (m.type || "pdf").toLowerCase(),
           duration: m.duration || "10 menit",
           file_url: m.file_url,
+          url: m.url,
           completed: m.completed === true || m.completed === "true" || m.completed === "t" || m.completed === 1 || m.completed === "1",
 
           pdfInfo: {
@@ -236,6 +248,9 @@ export function LessonContentPage({ moduleId, onClose }: LessonContentPageProps)
     return `${hours} jam ${remainingMinutes} menit`;
   };
 
+  console.log("CURRENT LESSON:", currentLesson);
+  console.log("VIDEO SRC:", getMediaSrc(currentLesson));
+
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
@@ -333,35 +348,15 @@ export function LessonContentPage({ moduleId, onClose }: LessonContentPageProps)
             ) : (
               // Video Player (existing)
               <Card className="border-0 overflow-hidden shadow-lg">
-                <div
-                  className="relative h-[400px] bg-gradient-to-br from-gray-900 via-gray-800 to-black flex items-center justify-center"
-                  style={{
-                    backgroundImage: "linear-gradient(150.642deg, rgba(21, 93, 252, 0.2) 0%, rgba(152, 16, 250, 0.2) 100%)",
-                  }}
-                >
-                  {/* Decorative Blur Elements */}
-                  <div className="absolute left-1/4 top-1/4 w-64 h-64 bg-blue-500/10 rounded-full blur-3xl" />
-                  <div className="absolute right-1/4 top-1/3 w-64 h-64 bg-purple-500/10 rounded-full blur-3xl" />
-
-                  {/* Play Button */}
-                  <button className="relative z-10 w-20 h-20 bg-white/20 backdrop-blur-sm rounded-full flex items-center justify-center hover:bg-white/30 transition-all hover:scale-110">
-                    <Play className="w-10 h-10 text-white ml-1" />
-                  </button>
-
-                  {/* Video Controls */}
-                  <div className="absolute bottom-4 left-4 right-4 flex items-center gap-3">
-                    <button className="w-10 h-10 bg-black/50 backdrop-blur-sm rounded-lg flex items-center justify-center hover:bg-black/70 transition-colors">
-                      <Volume2 className="w-5 h-5 text-white" />
-                    </button>
-                    <button className="w-10 h-10 bg-black/50 backdrop-blur-sm rounded-lg flex items-center justify-center hover:bg-black/70 transition-colors">
-                      <Download className="w-5 h-5 text-white" />
-                    </button>
-                    <div className="flex-1" />
-                    <button className="w-10 h-10 bg-black/50 backdrop-blur-sm rounded-lg flex items-center justify-center hover:bg-black/70 transition-colors">
-                      <Maximize className="w-5 h-5 text-white" />
-                    </button>
-                  </div>
-                </div>
+                {currentLesson?.url?.includes("youtube") || currentLesson?.url?.includes("youtu.be") ? (
+                  <iframe className="w-full h-[400px]" src={currentLesson.url.replace("youtu.be/", "youtube.com/embed/").replace("watch?v=", "embed/")} title="YouTube video player" allowFullScreen />
+                ) : currentLesson?.type === "video" && getMediaSrc(currentLesson) ? (
+                  <video key={getMediaSrc(currentLesson)} controls className="w-full h-[400px] bg-black object-contain">
+                    <source src={getMediaSrc(currentLesson)} type="video/mp4" />
+                  </video>
+                ) : (
+                  <div className="h-[400px] bg-gray-900 flex items-center justify-center text-white">Video tidak tersedia</div>
+                )}
               </Card>
             )}
 

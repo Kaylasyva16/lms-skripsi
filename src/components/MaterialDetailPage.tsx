@@ -34,6 +34,30 @@ export function MaterialDetailPage({ onClose }: MaterialDetailPageProps) {
   const [modules, setModules] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
+  function normalizeTopics(topics: any): string[] {
+    if (Array.isArray(topics)) {
+      return topics.map((t) => (typeof t === "string" ? t : t?.title ?? t?.name ?? "Topik"));
+    }
+
+    if (typeof topics === "string") {
+      try {
+        const parsed = JSON.parse(topics);
+        if (Array.isArray(parsed)) {
+          return parsed.map((t) => (typeof t === "string" ? t : t?.title ?? t?.name ?? "Topik"));
+        }
+        return [topics];
+      } catch {
+        return [topics];
+      }
+    }
+
+    if (topics && typeof topics === "object") {
+      return Object.values(topics).map((t: any) => (typeof t === "string" ? t : t?.title ?? t?.name ?? "Topik"));
+    }
+
+    return [];
+  }
+
   const fetchModules = async () => {
     try {
       setLoading(true);
@@ -54,11 +78,9 @@ export function MaterialDetailPage({ onClose }: MaterialDetailPageProps) {
           subtitle: "",
           description: m.description,
           duration: m.duration,
-
           total: Number(m.total_materials ?? m.total ?? 0),
           completed: Number(m.completed_materials ?? m.completed ?? 0),
-          topics: m.topics ?? [],
-
+          topics: normalizeTopics(m.topics),
           unlocked: index === 0 || prevCompleted >= prevTotal,
           level: "Beginner",
           bgGradient: getModuleGradient(m.color),
@@ -219,7 +241,7 @@ export function MaterialDetailPage({ onClose }: MaterialDetailPageProps) {
                       <div className="mt-4 pt-4 border-t border-gray-200">
                         <p className="text-xs font-medium text-gray-700 mb-3">Yang akan dipelajari:</p>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                          {module.topics.map((topic, idx) => (
+                          {(Array.isArray(module.topics) ? module.topics : []).map((topic, idx) => (
                             <div key={idx} className="flex items-center gap-2">
                               <div className="w-1.5 h-1.5 rounded-full bg-blue-500 flex-shrink-0" />
                               <span className="text-sm text-gray-700">{topic}</span>

@@ -1,17 +1,17 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { ArrowLeft, Plus, Trash2, GripVertical, Save, Edit } from "lucide-react";
 import { QuestionEditor } from "./QuestionEditor";
 
 interface Question {
   id: string;
-  type: "multiple-choice" |"Essay" | "drag-drop" | "matching" | "logic-flow" | "debugging" | "simulation";
+  type: "multiple-choice" | "essay" | "drag-drop" | "matching" | "logic-flow" | "debugging" | "simulation";
   data: any;
   points: number;
 }
 
 interface QuizCreatorProps {
   quiz: any;
-  onSave: (data: any) => void;
+  onSave: (data: any) => Promise<any>;
   onCancel: () => void;
 }
 
@@ -23,6 +23,127 @@ export const QuizCreator: React.FC<QuizCreatorProps> = ({ quiz, onSave, onCancel
   const [questions, setQuestions] = useState<Question[]>(quiz?.questions || []);
   const [editingQuestion, setEditingQuestion] = useState<{ question: Question | null; index: number } | null>(null);
   const [selectingTypeIndex, setSelectingTypeIndex] = useState<number | null>(null);
+  const [currentQuiz, setCurrentQuiz] = useState<any>(quiz || null);
+  const [savingQuiz, setSavingQuiz] = useState(false);
+  const [kelas, setKelas] = useState(quiz?.kelas || "");
+  const [kelasOptions, setKelasOptions] = useState<{ id: number; nama: string }[]>([]);
+
+  const token = localStorage.getItem("token");
+
+  // sync quiz dari parent ke state lokal
+  useEffect(() => {
+    setCurrentQuiz(quiz || null);
+    setTitle(quiz?.title || "");
+    setKelas(quiz?.kelas || "");
+    setDescription(quiz?.description || "");
+    setDuration(quiz?.duration || 30);
+    setStatus(quiz?.status || "draft");
+  }, [quiz]);
+
+  const mapQuestionFromApi = (q: any): Question => {
+    return {
+      id: String(q.id),
+      type: q.type,
+      points: q.points,
+      data: {
+        question: q.questionText || "",
+        explanation: q.explanation || "",
+        guideline: q.payload?.guideline || "",
+        options: (q.options || []).map((opt: any) => ({
+          text: opt.optionText,
+          isCorrect: opt.isCorrect,
+        })),
+        ...q.payload,
+      },
+    };
+  };
+
+  const buildQuestionPayload = (question: Question) => {
+    if (question.type === "multiple-choice") {
+      return {
+        type: question.type,
+        questionText: question.data.question || "",
+        explanation: question.data.explanation || "",
+        points: question.points,
+        payload: {},
+        options: (question.data.options || []).map((opt: any) => ({
+          optionText: opt.text || "",
+          isCorrect: !!opt.isCorrect,
+        })),
+      };
+    }
+
+    if (question.type === "essay") {
+      return {
+        type: question.type,
+        questionText: question.data.question || "",
+        explanation: question.data.explanation || "",
+        points: question.points,
+        payload: {
+          guideline: question.data.guideline || "",
+        },
+        options: [],
+      };
+    }
+
+    return {
+      type: question.type,
+      questionText: question.data.question || "",
+      explanation: question.data.explanation || "",
+      points: question.points,
+      payload: question.data || {},
+      options: [],
+    };
+  };
+
+  // DEBUG
+  useEffect(() => {
+    console.log("QUESTIONS:", questions);
+  }, [questions]);
+
+  useEffect(() => {
+    const fetchQuestions = async () => {
+      if (!currentQuiz?.id || !token) return;
+
+      try {
+        const res = await fetch(`http://localhost:5000/api/quizzes/${currentQuiz.id}/questions`, {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        });
+
+        if (!res.ok) {
+          throw new Error("Gagal mengambil soal");
+        }
+
+        const data = await res.json();
+        setQuestions(data.map(mapQuestionFromApi));
+      } catch (err) {
+        console.error("FETCH QUESTIONS ERROR:", err);
+      }
+    };
+
+    fetchQuestions();
+  }, [currentQuiz?.id, token]);
+
+  useEffect(() => {
+    const fetchKelas = async () => {
+      try {
+        const res = await fetch("http://localhost:5000/public/kelas");
+
+        if (!res.ok) {
+          throw new Error("Gagal mengambil data kelas");
+        }
+
+        const data = await res.json();
+        setKelasOptions(data);
+      } catch (err) {
+        console.error("FETCH KELAS ERROR:", err);
+      }
+    };
+
+    fetchKelas();
+  }, []);
 
   const questionTypes = [
     { id: "multiple-choice", label: "Pilihan Ganda", icon: "📝", active: true },
@@ -35,6 +156,11 @@ export const QuizCreator: React.FC<QuizCreatorProps> = ({ quiz, onSave, onCancel
   ];
 
   const handleAddQuestion = () => {
+    if (!currentQuiz?.id) {
+      alert("Simpan kuis dulu sebelum menambahkan soal");
+      return;
+    }
+
     setSelectingTypeIndex(questions.length);
   };
 
@@ -42,33 +168,109 @@ export const QuizCreator: React.FC<QuizCreatorProps> = ({ quiz, onSave, onCancel
     setEditingQuestion({ question, index });
   };
 
-  const handleSaveQuestion = (question: Question) => {
-    if (editingQuestion) {
-      if (editingQuestion.question) {
-        // Update existing question
-        setQuestions(questions.map((q) => (q.id === question.id ? question : q)));
+  const handleSaveQuestion = async (question: Question) => {
+    if (!editingQuestion || !currentQuiz?.id || !token) {
+      alert("Simpan kuis dulu sebelum menambahkan soal");
+      return;
+    }
+
+    try {
+      const payload = buildQuestionPayload(question);
+      const isExistingQuestion = questions.some((q) => q.id === question.id);
+
+      let res: Response;
+
+      if (isExistingQuestion) {
+        res = await fetch(`http://localhost:5000/api/questions/${question.id}`, {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify(payload),
+        });
       } else {
-        // Add new question
-        setQuestions([...questions, question]);
+        res = await fetch(`http://localhost:5000/api/quizzes/${currentQuiz.id}/questions`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify(payload),
+        });
       }
+
+      if (!res.ok) {
+        throw new Error("Gagal menyimpan soal");
+      }
+
+      const savedQuestion = await res.json();
+
+      const mappedQuestion: Question = {
+        id: String(savedQuestion.id),
+        type: savedQuestion.type,
+        points: savedQuestion.points,
+        data: {
+          question: savedQuestion.questionText || payload.questionText,
+          explanation: savedQuestion.explanation || payload.explanation || "",
+          guideline: savedQuestion.payload?.guideline || payload.payload?.guideline || "",
+          options: (payload.options || []).map((opt: any) => ({
+            text: opt.optionText,
+            isCorrect: opt.isCorrect,
+          })),
+          ...savedQuestion.payload,
+        },
+      };
+
+      setQuestions((prev) => {
+        const index = editingQuestion.index;
+        const updated = [...prev];
+
+        if (updated[index]) {
+          updated[index] = mappedQuestion;
+        } else {
+          updated.push(mappedQuestion);
+        }
+
+        return updated;
+      });
+
+      setEditingQuestion(null);
+    } catch (err: any) {
+      alert(err.message || "Terjadi kesalahan saat menyimpan soal");
     }
-    setEditingQuestion(null);
   };
 
-  const deleteQuestion = (id: string) => {
-    if (confirm("Hapus soal ini?")) {
-      setQuestions(questions.filter((q) => q.id !== id));
+  const deleteQuestion = async (id: string) => {
+    if (!confirm("Hapus soal ini?")) return;
+    if (!token) return;
+
+    try {
+      const res = await fetch(`http://localhost:5000/api/questions/${id}`, {
+        method: "DELETE",
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      if (!res.ok) {
+        throw new Error("Gagal menghapus soal");
+      }
+
+      setQuestions((prev) => prev.filter((q) => q.id !== id));
+    } catch (err: any) {
+      alert(err.message || "Terjadi kesalahan saat menghapus soal");
     }
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!title.trim()) {
       alert("Judul kuis harus diisi");
       return;
     }
 
-    if (questions.length === 0) {
-      alert("Tambahkan minimal 1 soal");
+    if (!kelas.trim()) {
+      alert("Kelas harus dipilih");
       return;
     }
 
@@ -78,6 +280,8 @@ export const QuizCreator: React.FC<QuizCreatorProps> = ({ quiz, onSave, onCancel
           switch (q.type) {
             case "multiple-choice":
               return "Multiple Choice";
+            case "essay":
+              return "Essay";
             case "drag-drop":
               return "Drag & Drop";
             case "matching":
@@ -93,17 +297,31 @@ export const QuizCreator: React.FC<QuizCreatorProps> = ({ quiz, onSave, onCancel
           }
         })
       ),
-    ];
+    ].filter(Boolean);
 
-    onSave({
-      title,
-      description,
-      duration,
-      status,
-      questions,
-      totalQuestions: questions.length,
-      questionTypes,
-    });
+    try {
+      setSavingQuiz(true);
+
+      console.log("STATUS SAAT DISIMPAN:", status);
+
+      const savedQuiz = await onSave({
+        id: currentQuiz?.id,
+        title,
+        kelas,
+        description,
+        duration,
+        status,
+        questions,
+        totalQuestions: questions.length,
+        questionTypes,
+      });
+
+      setCurrentQuiz(savedQuiz);
+    } catch (err: any) {
+      alert(err.message || "Gagal menyimpan kuis");
+    } finally {
+      setSavingQuiz(false);
+    }
   };
 
   if (selectingTypeIndex !== null) {
@@ -116,7 +334,7 @@ export const QuizCreator: React.FC<QuizCreatorProps> = ({ quiz, onSave, onCancel
               <button onClick={() => setSelectingTypeIndex(null)} className="p-3 rounded-2xl bg-white border border-gray-200 shadow-sm hover:shadow-md transition">
                 <ArrowLeft className="w-5 h-5 text-gray-700" />
               </button>
-            
+
               <div>
                 <h1 className="text-2xl font-semibold text-gray-900">Tambah Soal Baru #{selectingTypeIndex + 1}</h1>
                 <p className="text-gray-500 mt-1">Pilih tipe soal terlebih dahulu</p>
@@ -131,60 +349,46 @@ export const QuizCreator: React.FC<QuizCreatorProps> = ({ quiz, onSave, onCancel
             <h2 className="text-lg font-semibold text-gray-800 mb-8">Pilih Tipe Soal</h2>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-8 mt-6">
-  {questionTypes.map((type) => {
-    const isActive =
-      type.id === "multiple-choice" || type.id === "essay";
+              {questionTypes.map((type) => {
+                const isActive = type.id === "multiple-choice" || type.id === "essay";
 
-    return (
-      <div
-        key={type.id}
-        onClick={() => {
-          if (!isActive) return; // 🚫 blok kalau tidak aktif
+                return (
+                  <div
+                    key={type.id}
+                    onClick={() => {
+                      if (!isActive) return; // 🚫 blok kalau tidak aktif
 
-          setEditingQuestion({
-            question: {
-              id: Date.now().toString(),
-              type: type.id as any,
-              data: {},
-              points: 10,
-            },
-            index: selectingTypeIndex,
-          });
-          setSelectingTypeIndex(null);
-        }}
-        className={`relative rounded-2xl p-8 border transition-all duration-300
-          ${
-            isActive
-              ? "bg-white border-gray-200 cursor-pointer hover:border-blue-500 hover:shadow-lg"
-              : "bg-gray-50 border-gray-200 opacity-60 cursor-not-allowed"
-          }`}
-      >
-        {/* Badge Coming Soon */}
-        {!isActive && (
-          <span className="absolute top-4 right-4 text-xs bg-gray-200 text-gray-600 px-3 py-1 rounded-full">
-            Coming Soon
-          </span>
-        )}
+                      setEditingQuestion({
+                        question: {
+                          id: Date.now().toString(),
+                          type: type.id as any,
+                          data: {},
+                          points: 10,
+                        },
+                        index: selectingTypeIndex,
+                      });
+                      setSelectingTypeIndex(null);
+                    }}
+                    className={`relative rounded-2xl p-8 border transition-all duration-300
+          ${isActive ? "bg-white border-gray-200 cursor-pointer hover:border-blue-500 hover:shadow-lg" : "bg-gray-50 border-gray-200 opacity-60 cursor-not-allowed"}`}
+                  >
+                    {/* Badge Coming Soon */}
+                    {!isActive && <span className="absolute top-4 right-4 text-xs bg-gray-200 text-gray-600 px-3 py-1 rounded-full">Coming Soon</span>}
 
-        <div className="text-3xl mb-4">{type.icon}</div>
+                    <div className="text-3xl mb-4">{type.icon}</div>
 
-        <h3 className="text-lg font-semibold text-gray-900 mb-2">
-          {type.label}
-        </h3>
+                    <h3 className="text-lg font-semibold text-gray-900 mb-2">{type.label}</h3>
 
-        <p className="text-gray-500 text-sm">
-          {isActive ? "Pilih tipe soal ini" : "Segera hadir"}
-        </p>
+                    <p className="text-gray-500 text-sm">{isActive ? "Pilih tipe soal ini" : "Segera hadir"}</p>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
       </div>
     );
-  })}
-</div>
-
-</div>
-      </div>
-    </div>
-  );
-}
+  }
 
   // Show question editor if editing
   if (editingQuestion !== null) {
@@ -217,9 +421,10 @@ export const QuizCreator: React.FC<QuizCreatorProps> = ({ quiz, onSave, onCancel
             <button onClick={() => setStatus(status === "draft" ? "published" : "draft")} className={`px-4 py-2 rounded-lg transition-colors ${status === "published" ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-600"}`}>
               {status === "published" ? "Dipublikasi" : "Draft"}
             </button>
-            <button onClick={handleSave} className="flex items-center gap-2 bg-blue-500 text-white px-6 py-2 rounded-lg hover:bg-blue-600 transition-colors">
+
+            <button onClick={handleSave} disabled={savingQuiz} className="flex items-center gap-2 bg-blue-500 text-white px-6 py-2 rounded-lg hover:bg-blue-600 transition-colors disabled:opacity-60">
               <Save className="w-5 h-5" />
-              Simpan Kuis
+              {savingQuiz ? "Menyimpan..." : "Simpan Kuis"}
             </button>
           </div>
         </div>
@@ -233,6 +438,7 @@ export const QuizCreator: React.FC<QuizCreatorProps> = ({ quiz, onSave, onCancel
             <h2 className="text-gray-800 mb-4">Informasi Kuis</h2>
 
             <div className="space-y-4">
+              {/* Judul */}
               <div>
                 <label className="block text-gray-700 mb-2">Judul Kuis *</label>
                 <input
@@ -242,6 +448,19 @@ export const QuizCreator: React.FC<QuizCreatorProps> = ({ quiz, onSave, onCancel
                   placeholder="Masukkan judul kuis..."
                   className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400"
                 />
+              </div>
+
+              {/* KELAS */}
+              <div>
+                <label className="block text-gray-700 mb-2">Kelas *</label>
+                <select value={kelas} onChange={(e) => setKelas(e.target.value)} className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400 bg-white">
+                  <option value="">Pilih kelas</option>
+                  {kelasOptions.map((item) => (
+                    <option key={item.id} value={item.nama}>
+                      {item.nama}
+                    </option>
+                  ))}
+                </select>
               </div>
 
               <div>
@@ -332,6 +551,10 @@ export const QuizCreator: React.FC<QuizCreatorProps> = ({ quiz, onSave, onCancel
               <div className="flex justify-between items-center">
                 <span className="text-gray-600">Total Poin</span>
                 <span className="text-gray-800">{questions.reduce((sum, q) => sum + q.points, 0)}</span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-gray-600">Kelas</span>
+                <span className="text-gray-800">{kelas || "-"}</span>
               </div>
               <div className="flex justify-between items-center">
                 <span className="text-gray-600">Durasi</span>

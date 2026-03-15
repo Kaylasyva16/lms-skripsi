@@ -69,107 +69,13 @@ interface SimulationQuestion extends BaseQuestion {
   explanation?: string;
 }
 
-interface MultipleChoiceQuestion extends BaseQuestion {
-  type: "multiple-choice";
-  options: string[];
-  correctAnswer: number;
+interface DragDropQuestion extends BaseQuestion {
+  type: "drag-drop";
+  items: string[];
+  correctOrder: number[];
 }
 
 type Question = MultipleChoiceQuestion | EssayQuestion | MatchingQuestion | LogicFlowQuestion | DebuggingQuestion | SimulationQuestion | DragDropQuestion;
-
-const quizzes = [
-  {
-    id: 1,
-    title: "Kuis Percabangan IF Statement",
-    description: "Uji pemahaman tentang konsep IF, ELSE, dan operator relasional dengan soal pilihan ganda",
-    level: "Beginner",
-    totalQuestions: 7,
-    duration: 12,
-    status: "available",
-    subject: "Percabangan",
-    type: "multiple-choice",
-    icon: "🎯",
-    score: null,
-  },
-  {
-    id: 2,
-    title: "Kuis Drag & Drop - Alur Percabangan",
-    description: "Susun urutan eksekusi percabangan nested IF dan switch-case dengan benar",
-    level: "Intermediate",
-    totalQuestions: 6,
-    duration: 15,
-    status: "available",
-    subject: "Nested IF",
-    type: "drag-drop",
-    icon: "🎮",
-    score: null,
-  },
-  {
-    id: 3,
-    title: "Kuis Matching - Loop & Percabangan",
-    description: "Cocokkan jenis loop (FOR, WHILE, DO-WHILE) dengan kasus penggunaannya",
-    level: "Intermediate",
-    totalQuestions: 6,
-    duration: 15,
-    status: "available",
-    subject: "Perulangan",
-    type: "matching",
-    icon: "🧩",
-    score: null,
-  },
-  {
-    id: 4,
-    title: "Logic Flow Puzzle - Nested Loop",
-    description: "Tentukan output yang benar dari nested loop dan kombinasi percabangan-perulangan",
-    level: "Intermediate",
-    totalQuestions: 6,
-    duration: 18,
-    status: "available",
-    subject: "Logic",
-    type: "logic-flow",
-    icon: "🔀",
-    score: null,
-  },
-  {
-    id: 5,
-    title: "Debugging Puzzle - Loop & IF Error",
-    description: "Temukan bug dalam kode percabangan dan perulangan, lalu perbaiki",
-    level: "Expert",
-    totalQuestions: 6,
-    duration: 20,
-    status: "available",
-    subject: "Debugging",
-    type: "debugging",
-    icon: "🐛",
-    score: null,
-  },
-  {
-    id: 6,
-    title: "Simulation - Trace Loop Execution",
-    description: "Simulasikan jalannya perulangan step-by-step dan tentukan nilai variabel",
-    level: "Expert",
-    totalQuestions: 6,
-    duration: 22,
-    status: "available",
-    subject: "Simulation",
-    type: "simulation",
-    icon: "⚙️",
-    score: null,
-  },
-  {
-    id: 7,
-    title: "Essay - Analisis Percabangan & Loop",
-    description: "Jawab pertanyaan essay tentang konsep, perbedaan, dan implementasi percabangan-perulangan",
-    level: "Expert",
-    totalQuestions: 5,
-    duration: 25,
-    status: "available",
-    subject: "Essay",
-    type: "essay",
-    icon: "✍️",
-    score: null,
-  },
-];
 
 // Quiz 1: Multiple Choice - Percabangan IF
 const quiz1Questions: Question[] = [
@@ -674,16 +580,6 @@ const quiz7Questions: Question[] = [
   },
 ];
 
-const quizQuestionsMap: Record<number, Question[]> = {
-  1: quiz1Questions,
-  2: quiz2Questions,
-  3: quiz3Questions,
-  4: quiz4Questions,
-  5: quiz5Questions,
-  6: quiz6Questions,
-  7: quiz7Questions,
-};
-
 // Drag and Drop Components
 interface DragItem {
   index: number;
@@ -765,20 +661,136 @@ export function QuizPage() {
   const userRole: "student" | "teacher" = "student";
   // ganti ke 'teacher' kalau mau test akses penuh
 
-  const rolePermissions: Record<string, QuestionType[]> = {
-    student: ["multiple-choice", "essay"],
-    teacher: ["multiple-choice", "drag-drop", "matching", "logic-flow", "debugging", "simulation", "essay"],
-  };
+  const isQuizAllowed = (_quiz: any) => true;
 
-  const isQuizAllowed = (type: QuestionType) => {
-    return rolePermissions[userRole]?.includes(type);
-  };
   const [viewMode, setViewMode] = useState<ViewMode>("list");
   const [selectedQuiz, setSelectedQuiz] = useState<(typeof quizzes)[0] | null>(null);
   const [currentQuestion, setCurrentQuestion] = useState(0);
   const [answers, setAnswers] = useState<Record<number, any>>({});
   const [timeLeft, setTimeLeft] = useState(0);
   const [quizResult, setQuizResult] = useState<{ score: number; correct: number; total: number; totalPoints: number; earnedPoints: number } | null>(null);
+  const [showSuccess, setShowSuccess] = useState(false);
+  const [quizQuestions, setQuizQuestions] = useState<Question[]>([]);
+
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    if (showSuccess) {
+      const timer = setTimeout(() => {
+        setShowSuccess(false);
+      }, 3000);
+
+      return () => clearTimeout(timer);
+    }
+  }, [showSuccess]);
+
+  const handleStartQuiz = async (quiz: any) => {
+    if (!isQuizAllowed(quiz.type as QuestionType)) {
+      toast.error("Kuis ini tidak tersedia untuk siswa.");
+      return;
+    }
+
+    try {
+      const token = localStorage.getItem("token");
+
+      const res = await fetch(`http://localhost:5000/api/student/quizzes/${quiz.id}/questions`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      if (!res.ok) {
+        const text = await res.text();
+        console.error("Quiz detail error:", text);
+        throw new Error("Gagal mengambil detail kuis");
+      }
+
+      const data = await res.json();
+
+      const filteredQuestions = data
+        .filter((q: any) => q.type === "multiple-choice" || q.type === "essay")
+        .map((q: any) => {
+          if (q.type === "multiple-choice") {
+            return {
+              id: q.id,
+              type: "multiple-choice" as const,
+              question: q.questionText,
+              points: q.points ?? 10,
+              difficulty: q.payload?.difficulty ?? "Sedang",
+              options: q.options?.map((opt: any) => opt.optionText) || [],
+              correctAnswer: q.options?.findIndex((opt: any) => opt.isCorrect) ?? 0,
+            };
+          }
+
+          return {
+            id: q.id,
+            type: "essay" as const,
+            question: q.questionText,
+            points: q.points ?? 10,
+            difficulty: q.payload?.difficulty ?? "Sedang",
+            minWords: q.payload?.minWords ?? 30,
+            keywords: q.payload?.keywords ?? [],
+            sampleAnswer: q.explanation ?? "",
+          };
+        });
+
+      setSelectedQuiz(quiz);
+      setQuizQuestions(filteredQuestions);
+      setViewMode("detail");
+    } catch (error) {
+      console.error(error);
+      toast.error("Gagal mengambil detail kuis");
+    }
+  };
+
+  const [quizzes, setQuizzes] = useState<any[]>([]);
+
+  useEffect(() => {
+    const fetchQuizzes = async () => {
+      try {
+        setLoading(true);
+
+        const token = localStorage.getItem("token");
+
+        const res = await fetch("http://localhost:5000/api/student/quizzes", {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        });
+
+        if (!res.ok) {
+          const text = await res.text();
+          console.error("Quiz list error:", text);
+          throw new Error("Gagal memuat kuis");
+        }
+
+        const data = await res.json();
+
+        const mapped = data.map((item: any) => ({
+          id: item.id,
+          title: item.title,
+          description: item.description,
+          level: item.level ?? "Beginner",
+          totalQuestions: item.totalQuestions,
+          duration: item.duration,
+          status: item.status ?? "available",
+          subject: item.subject ?? "-",
+          type: item.type,
+          icon: item.icon ?? "📝",
+          score: item.score ?? null,
+          totalPoints: item.totalPoints ?? 0,
+        }));
+
+        setQuizzes(mapped);
+      } catch (error) {
+        console.error(error);
+        toast.error("Gagal memuat kuis");
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchQuizzes();
+  }, []);
 
   // For drag and drop
   const [dragItems, setDragItems] = useState<string[]>([]);
@@ -810,16 +822,6 @@ export function QuizPage() {
     }
   }, [viewMode, timeLeft]);
 
-  const handleStartQuiz = (quiz: (typeof quizzes)[0]) => {
-    if (!isQuizAllowed(quiz.type as QuestionType)) {
-      toast.error("Kuis ini tidak tersedia untuk siswa.");
-      return;
-    }
-
-    setSelectedQuiz(quiz);
-    setViewMode("detail");
-  };
-
   const handleBeginQuiz = () => {
     if (selectedQuiz) {
       setViewMode("quiz");
@@ -833,7 +835,7 @@ export function QuizPage() {
       setSimulationSteps([]);
       setSimulationRun(false);
 
-      const questions = quizQuestionsMap[selectedQuiz.id];
+      const questions = quizQuestions;
       const firstQ = questions[0];
 
       if (firstQ.type === "drag-drop") {
@@ -881,7 +883,8 @@ export function QuizPage() {
   const handleNextQuestion = () => {
     if (!selectedQuiz) return;
 
-    const questions = quizQuestionsMap[selectedQuiz.id];
+    const questions = quizQuestions;
+
     const currentQ = questions[currentQuestion];
 
     // Save current answer
@@ -921,7 +924,8 @@ export function QuizPage() {
   const handlePrevQuestion = () => {
     if (!selectedQuiz) return;
 
-    const questions = quizQuestionsMap[selectedQuiz.id];
+    const questions = quizQuestions;
+
     const currentQ = questions[currentQuestion];
 
     if (currentQ.type === "drag-drop") {
@@ -960,7 +964,8 @@ export function QuizPage() {
   const handleSubmitQuiz = () => {
     if (!selectedQuiz) return;
 
-    const questions = quizQuestionsMap[selectedQuiz.id];
+    const questions = quizQuestions;
+
     const currentQ = questions[currentQuestion];
 
     if (currentQ.type === "drag-drop") {
@@ -987,7 +992,8 @@ export function QuizPage() {
         }
       } else if (q.type === "drag-drop") {
         const userAnswer = answers[q.id] || [];
-        const isCorrect = JSON.stringify(userAnswer) === JSON.stringify(q.items);
+        const correctSequence = q.correctOrder.map((i) => q.items[i]);
+        const isCorrect = JSON.stringify(userAnswer) === JSON.stringify(correctSequence);
         if (isCorrect) {
           correct++;
           earnedPoints += q.points;
@@ -1013,7 +1019,8 @@ export function QuizPage() {
         }
       } else if (q.type === "simulation") {
         const userAnswer = answers[q.id] || [];
-        const isCorrect = JSON.stringify(userAnswer) === JSON.stringify(q.steps);
+        const correctSequence = q.correctOrder.map((i) => q.steps[i]);
+        const isCorrect = JSON.stringify(userAnswer) === JSON.stringify(correctSequence);
         if (isCorrect) {
           correct++;
           earnedPoints += q.points;
@@ -1051,7 +1058,7 @@ export function QuizPage() {
       earnedPoints,
     });
     setViewMode("result");
-    toast.success("Kuis berhasil diselesaikan!");
+    setShowSuccess(true);
   };
 
   const formatTime = (seconds: number) => {
@@ -1135,8 +1142,8 @@ export function QuizPage() {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {[...quizzes]
             .sort((a, b) => {
-              const aAllowed = isQuizAllowed(a.type as QuestionType);
-              const bAllowed = isQuizAllowed(b.type as QuestionType);
+              const aAllowed = isQuizAllowed(a);
+              const bAllowed = isQuizAllowed(b);
 
               // yang allowed tampil dulu
               if (aAllowed && !bAllowed) return -1;
@@ -1145,7 +1152,7 @@ export function QuizPage() {
               return 0;
             })
             .map((quiz) => {
-              const disabled = !isQuizAllowed(quiz.type as QuestionType);
+              const disabled = !isQuizAllowed(quiz);
 
               return (
                 <Card key={quiz.id} className={`relative transition-shadow border-2 ${disabled ? "opacity-50 border-gray-200" : "hover:shadow-lg border-gray-200 hover:border-blue-300"}`}>
@@ -1209,12 +1216,15 @@ export function QuizPage() {
 
   // DETAIL VIEW
   if (viewMode === "detail" && selectedQuiz) {
-    const questions = quizQuestionsMap[selectedQuiz.id];
+    const questions = quizQuestions;
+
     const difficultyCount = {
       mudah: questions.filter((q) => q.difficulty === "Mudah").length,
       sedang: questions.filter((q) => q.difficulty === "Sedang").length,
       sulit: questions.filter((q) => q.difficulty === "Sulit").length,
     };
+
+    const totalPoints = questions.reduce((sum, q) => sum + q.points, 0);
 
     return (
       <div className="space-y-6">
@@ -1311,7 +1321,7 @@ export function QuizPage() {
                   <Trophy className="w-5 h-5" />
                   <div>
                     <p className="text-blue-100 text-sm">Total Poin</p>
-                    <p className="font-bold">120 Poin</p>
+                    <p className="font-bold">{totalPoints} Poin</p>
                   </div>
                 </div>
               </CardContent>
@@ -1329,455 +1339,122 @@ export function QuizPage() {
 
   // QUIZ VIEW - will continue in next message due to length
   if (viewMode === "quiz" && selectedQuiz) {
-    const questions = quizQuestionsMap[selectedQuiz.id];
+    const questions = quizQuestions;
     const progress = ((currentQuestion + 1) / questions.length) * 100;
     const currentQ = questions[currentQuestion];
 
     return (
-      <DndProvider backend={HTML5Backend}>
-        <div className="space-y-6">
-          <Card className="bg-gradient-to-r from-blue-500 to-purple-600 text-white">
-            <CardContent className="pt-6">
-              <div className="flex items-center justify-between mb-4">
-                <div>
-                  <p className="text-blue-100 text-sm mb-1">Waktu Tersisa</p>
-                  <div className="flex items-center gap-2">
-                    <Timer className="w-5 h-5" />
-                    <span className="text-2xl font-bold">{formatTime(timeLeft)}</span>
-                  </div>
-                </div>
-                <div className="text-right">
-                  <p className="text-blue-100 text-sm mb-1">Progress</p>
-                  <p className="text-2xl font-bold">
-                    {currentQuestion + 1}/{questions.length}
-                  </p>
-                </div>
-              </div>
-              <Progress value={progress} className="h-2 bg-blue-400" />
-            </CardContent>
-          </Card>
+      <div className="fixed inset-0 z-50 bg-[#eef5ff] overflow-auto">
+        <DndProvider backend={HTML5Backend}>
+          <div className="max-w-5xl mx-auto p-6 space-y-6">
+            {/* HEADER */}
+            <div className="flex justify-between items-center">
+              <h2 className="text-xl font-bold text-gray-800">{selectedQuiz.title}</h2>
 
-          <Card className="border-2 border-blue-200">
-            <CardHeader>
-              <div className="flex items-center justify-between mb-3">
-                <div className="flex gap-2">
-                  <Badge className="bg-gradient-to-r from-blue-500 to-purple-500">Soal {currentQuestion + 1}</Badge>
-                  <Badge className={getDifficultyColor(currentQ.difficulty)}>
-                    {getDifficultyIcon(currentQ.difficulty)} {currentQ.difficulty}
-                  </Badge>
-                </div>
-                <Badge className="bg-yellow-500">
-                  <Trophy className="w-3 h-3 mr-1" />
-                  {currentQ.points} poin
-                </Badge>
-              </div>
-              <CardTitle className="text-lg whitespace-pre-line">{currentQ.question}</CardTitle>
-            </CardHeader>
-            <CardContent>
-              {/* Multiple Choice */}
-              {currentQ.type === "multiple-choice" && (
-                <RadioGroup value={answers[currentQ.id]?.toString()} onValueChange={(value) => handleAnswerChange(currentQ.id, parseInt(value))}>
-                  <div className="space-y-3">
-                    {currentQ.options.map((option, index) => (
-                      <div
-                        key={index}
-                        className={`flex items-center space-x-3 p-4 rounded-lg border-2 transition-all cursor-pointer ${
-                          answers[currentQ.id] === index ? "border-blue-500 bg-blue-50 shadow-md" : "border-gray-200 hover:border-blue-300 hover:bg-gray-50"
-                        }`}
-                        onClick={() => handleAnswerChange(currentQ.id, index)}
-                      >
-                        <RadioGroupItem value={index.toString()} id={`option-${index}`} />
-                        <Label htmlFor={`option-${index}`} className="flex-1 cursor-pointer text-gray-700">
-                          {option}
-                        </Label>
-                      </div>
-                    ))}
-                  </div>
-                </RadioGroup>
-              )}
-
-              {/* Drag and Drop */}
-              {currentQ.type === "drag-drop" && (
-                <div className="space-y-4">
-                  <div className="bg-gradient-to-r from-purple-50 to-blue-50 rounded-lg p-4 border border-purple-200">
-                    <p className="text-sm text-gray-600 flex items-center gap-2">
-                      <GripVertical className="w-4 h-4 text-purple-500" />
-                      Tarik dan susun item di bawah sesuai urutan yang benar
-                    </p>
-                  </div>
-                  <div className="space-y-3">
-                    {dragItems.map((item, index) => (
-                      <DraggableItem key={`${item}-${index}`} item={item} index={index} moveItem={moveItem} />
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Matching */}
-              {currentQ.type === "matching" && (
-                <div className="space-y-4">
-                  <div className="bg-gradient-to-r from-pink-50 to-purple-50 rounded-lg p-4 border border-pink-200">
-                    <p className="text-sm text-gray-600">Klik item di kiri, lalu klik pasangan yang cocok di kanan</p>
-                  </div>
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-3">
-                      {currentQ.leftItems.map((item, index) => (
-                        <MatchingItem
-                          key={index}
-                          leftItem={item}
-                          index={index}
-                          selectedMatch={selectedLeft}
-                          onSelect={() => {
-                            if (selectedLeft === null) {
-                              setSelectedLeft(index);
-                            } else {
-                              setSelectedLeft(null);
-                            }
-                          }}
-                        />
-                      ))}
-                    </div>
-                    <div className="space-y-3">
-                      {currentQ.rightItems.map((item, index) => {
-                        const isMatched = Object.values(matches).includes(index);
-                        return (
-                          <button
-                            key={index}
-                            onClick={() => {
-                              if (selectedLeft !== null) {
-                                handleMatchingSelect(selectedLeft, index);
-                              }
-                            }}
-                            disabled={selectedLeft === null}
-                            className={`w-full text-left p-4 rounded-lg border-2 transition-all ${
-                              isMatched ? "border-green-500 bg-green-50" : selectedLeft !== null ? "border-gray-200 hover:border-purple-300 bg-white cursor-pointer" : "border-gray-200 bg-gray-50 cursor-not-allowed opacity-60"
-                            }`}
-                          >
-                            <div className="flex items-center gap-3">
-                              <div className={`w-8 h-8 rounded-full flex items-center justify-center ${isMatched ? "bg-green-500 text-white" : "bg-gray-200 text-gray-600"}`}>{isMatched ? "✓" : String.fromCharCode(65 + index)}</div>
-                              <span className="text-gray-700">{item}</span>
-                            </div>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-                  {Object.keys(matches).length > 0 && (
-                    <div className="bg-green-50 rounded-lg p-4 border border-green-200">
-                      <p className="text-sm text-gray-600 mb-2">Pasangan yang sudah dicocokkan:</p>
-                      <div className="space-y-2">
-                        {Object.entries(matches).map(([left, right]) => (
-                          <div key={left} className="flex items-center gap-2 text-sm">
-                            <Badge className="bg-blue-500">{currentQ.leftItems[parseInt(left)]}</Badge>
-                            <span className="text-gray-400">→</span>
-                            <Badge className="bg-purple-500">{currentQ.rightItems[right]}</Badge>
-                            <button
-                              onClick={() => {
-                                const newMatches = { ...matches };
-                                delete newMatches[parseInt(left)];
-                                setMatches(newMatches);
-                              }}
-                              className="ml-auto text-red-500 hover:text-red-700"
-                            >
-                              <XCircle className="w-4 h-4" />
-                            </button>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* Logic Flow */}
-              {currentQ.type === "logic-flow" && (
-                <div className="space-y-4">
-                  <div className="bg-gradient-to-r from-cyan-50 to-blue-50 rounded-lg p-4 border border-cyan-200">
-                    <p className="text-sm text-gray-600 flex items-center gap-2">
-                      <GitBranch className="w-4 h-4 text-cyan-500" />
-                      Pilih jawaban yang tepat untuk melengkapi flow logic
-                    </p>
-                  </div>
-                  <div className="space-y-3">
-                    {currentQ.flowSteps.map((step, index) => (
-                      <div key={index} className="p-4 bg-gray-50 rounded-lg border border-gray-200">
-                        <p className="text-sm font-mono text-gray-700">{step}</p>
-                      </div>
-                    ))}
-                  </div>
-                  <div className="space-y-3 mt-4">
-                    <p className="text-sm font-medium text-gray-700">Pilih jawaban untuk mengisi [blank]:</p>
-                    {currentQ.blanks.map((blankIndex, idx) => (
-                      <div key={idx} className="space-y-2">
-                        <Label className="text-sm text-gray-600">Blank {idx + 1}:</Label>
-                        <RadioGroup
-                          value={logicAnswers[idx]}
-                          onValueChange={(value) => {
-                            const newAnswers = [...logicAnswers];
-                            newAnswers[idx] = value;
-                            setLogicAnswers(newAnswers);
-                          }}
-                        >
-                          <div className="grid grid-cols-2 gap-2">
-                            {currentQ.options.map((option, optIdx) => (
-                              <div
-                                key={optIdx}
-                                className={`flex items-center space-x-2 p-3 rounded-lg border-2 cursor-pointer ${logicAnswers[idx] === option ? "border-blue-500 bg-blue-50" : "border-gray-200 hover:border-blue-300"}`}
-                                onClick={() => {
-                                  const newAnswers = [...logicAnswers];
-                                  newAnswers[idx] = option;
-                                  setLogicAnswers(newAnswers);
-                                }}
-                              >
-                                <RadioGroupItem value={option} id={`logic-${idx}-${optIdx}`} />
-                                <Label htmlFor={`logic-${idx}-${optIdx}`} className="cursor-pointer text-sm">
-                                  {option}
-                                </Label>
-                              </div>
-                            ))}
-                          </div>
-                        </RadioGroup>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Debugging */}
-              {currentQ.type === "debugging" && (
-                <div className="space-y-4">
-                  <div className="bg-gradient-to-r from-red-50 to-orange-50 rounded-lg p-4 border border-red-200">
-                    <p className="text-sm text-gray-600 flex items-center gap-2">
-                      <Bug className="w-4 h-4 text-red-500" />
-                      Temukan bug dalam kode dan pilih solusi yang tepat
-                    </p>
-                  </div>
-                  <div className="bg-gray-900 rounded-lg p-4 font-mono text-sm">
-                    <pre className="text-green-400 whitespace-pre-wrap">
-                      {currentQ.code.split("\n").map((line, idx) => (
-                        <div key={idx} className={`${currentQ.errorLines.includes(idx + 1) ? "bg-red-900/50 border-l-4 border-red-500 pl-2" : ""}`}>
-                          {line}
-                        </div>
-                      ))}
-                    </pre>
-                  </div>
-                  <RadioGroup value={answers[currentQ.id]?.toString()} onValueChange={(value) => handleAnswerChange(currentQ.id, parseInt(value))}>
-                    <div className="space-y-3">
-                      {currentQ.options.map((option, index) => (
-                        <div
-                          key={index}
-                          className={`flex items-center space-x-3 p-4 rounded-lg border-2 transition-all cursor-pointer ${
-                            answers[currentQ.id] === index ? "border-red-500 bg-red-50 shadow-md" : "border-gray-200 hover:border-red-300 hover:bg-gray-50"
-                          }`}
-                          onClick={() => handleAnswerChange(currentQ.id, index)}
-                        >
-                          <RadioGroupItem value={index.toString()} id={`debug-${index}`} />
-                          <Label htmlFor={`debug-${index}`} className="flex-1 cursor-pointer text-gray-700">
-                            {option}
-                          </Label>
-                        </div>
-                      ))}
-                    </div>
-                  </RadioGroup>
-                </div>
-              )}
-
-              {/* Simulation */}
-              {currentQ.type === "simulation" && (
-                <div className="space-y-4">
-                  <div className="bg-gradient-to-r from-indigo-50 to-purple-50 rounded-lg p-4 border border-indigo-200">
-                    <p className="text-sm font-medium text-gray-900 mb-1 flex items-center gap-2">
-                      <Cpu className="w-4 h-4 text-indigo-500" />
-                      {currentQ.scenario}
-                    </p>
-                    <p className="text-sm text-gray-600">{currentQ.instruction}</p>
-                  </div>
-
-                  {!simulationRun ? (
-                    <>
-                      <div className="space-y-3">
-                        {simulationSteps.map((item, index) => (
-                          <DraggableItem key={`sim-${item}-${index}`} item={item} index={index} moveItem={moveSimulationItem} />
-                        ))}
-                      </div>
-
-                      <Button className="w-full bg-gradient-to-r from-indigo-500 to-purple-500 hover:from-indigo-600 hover:to-purple-600 gap-2" onClick={() => setSimulationRun(true)}>
-                        <Play className="w-4 h-4" />
-                        Run Simulation
-                      </Button>
-                    </>
-                  ) : (
-                    <>
-                      {(() => {
-                        const userAnswer = simulationSteps;
-                        const isCorrect = JSON.stringify(userAnswer) === JSON.stringify(currentQ.steps);
-
-                        return (
-                          <div className={`rounded-lg p-6 border-2 ${isCorrect ? "bg-green-50 border-green-500" : "bg-red-50 border-red-500"}`}>
-                            <div className="flex items-center gap-3 mb-4">
-                              {isCorrect ? (
-                                <>
-                                  <CheckCircle2 className="w-8 h-8 text-green-500" />
-                                  <div>
-                                    <p className="font-bold text-green-700">Correct! ✓</p>
-                                    <p className="text-sm text-green-600">Simulasi berjalan dengan urutan yang benar</p>
-                                  </div>
-                                </>
-                              ) : (
-                                <>
-                                  <XCircle className="w-8 h-8 text-red-500" />
-                                  <div>
-                                    <p className="font-bold text-red-700">Incorrect ✗</p>
-                                    <p className="text-sm text-red-600">Urutan simulasi tidak tepat</p>
-                                  </div>
-                                </>
-                              )}
-                            </div>
-
-                            <div className="bg-white rounded-lg p-4 border mb-4">
-                              <p className="text-sm font-medium text-gray-700 mb-2">Penjelasan:</p>
-                              <p className="text-sm text-gray-600">{currentQ.explanation}</p>
-                            </div>
-
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                              <div className="bg-white rounded-lg p-4 border">
-                                <p className="text-xs font-medium text-gray-600 mb-3">Urutan Anda:</p>
-                                <div className="space-y-2">
-                                  {userAnswer.map((step, idx) => (
-                                    <div key={idx} className="flex items-center gap-2">
-                                      <Badge variant="outline" className="bg-gray-100">
-                                        {idx + 1}
-                                      </Badge>
-                                      <span className="text-sm text-gray-700">{step}</span>
-                                    </div>
-                                  ))}
-                                </div>
-                              </div>
-                              <div className="bg-white rounded-lg p-4 border">
-                                <p className="text-xs font-medium text-green-600 mb-3">Urutan Benar:</p>
-                                <div className="space-y-2">
-                                  {currentQ.steps.map((step, idx) => (
-                                    <div key={idx} className="flex items-center gap-2">
-                                      <Badge variant="outline" className="bg-green-100 text-green-700">
-                                        {idx + 1}
-                                      </Badge>
-                                      <span className="text-sm text-gray-700">{step}</span>
-                                    </div>
-                                  ))}
-                                </div>
-                              </div>
-                            </div>
-                          </div>
-                        );
-                      })()}
-                    </>
-                  )}
-                </div>
-              )}
-
-              {/* Essay */}
-              {currentQ.type === "essay" && (
-                <div className="space-y-4">
-                  <div className="bg-gradient-to-r from-amber-50 to-yellow-50 rounded-lg p-4 border border-amber-200">
-                    <p className="text-sm text-gray-600 flex items-center gap-2">
-                      <Code2 className="w-4 h-4 text-amber-500" />
-                      Tulis jawaban Anda dengan lengkap dan jelas. Sertakan contoh kode jika diminta.
-                    </p>
-                    {currentQ.minWords && <p className="text-xs text-gray-500 mt-1">Minimal {currentQ.minWords} kata</p>}
-                  </div>
-
-                  <Textarea
-                    value={answers[currentQ.id] || ""}
-                    onChange={(e) => handleAnswerChange(currentQ.id, e.target.value)}
-                    placeholder="Tulis jawaban Anda di sini... Jelaskan dengan detail dan sertakan contoh jika diperlukan."
-                    className="min-h-[250px] resize-none text-gray-700"
-                  />
-
-                  <div className="flex items-center justify-between text-sm text-gray-600">
-                    <p>{currentQ.minWords && <>Minimal {currentQ.minWords} kata diperlukan</>}</p>
-                    <p>
-                      {answers[currentQ.id]
-                        ? `${
-                            answers[currentQ.id]
-                              .trim()
-                              .split(/\s+/)
-                              .filter((w) => w.length > 0).length
-                          } kata`
-                        : "0 kata"}
-                    </p>
-                  </div>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-
-          <div className="flex items-center justify-between">
-            <Button variant="outline" onClick={handlePrevQuestion} disabled={currentQuestion === 0} className="gap-2">
-              <ChevronLeft className="w-4 h-4" />
-              Sebelumnya
-            </Button>
-
-            <div className="flex gap-2">
-              {questions.map((q, index) => {
-                const isAnswered = answers[q.id] !== undefined;
-                return (
-                  <button
-                    key={index}
-                    onClick={() => {
-                      if (currentQ.type === "drag-drop") {
-                        handleAnswerChange(currentQ.id, [...dragItems]);
-                      } else if (currentQ.type === "matching") {
-                        handleAnswerChange(currentQ.id, { ...matches });
-                      } else if (currentQ.type === "logic-flow") {
-                        handleAnswerChange(currentQ.id, [...logicAnswers]);
-                      } else if (currentQ.type === "simulation") {
-                        handleAnswerChange(currentQ.id, [...simulationSteps]);
-                      }
-
-                      setCurrentQuestion(index);
-                      setSimulationRun(false);
-                      const nextQ = questions[index];
-
-                      if (nextQ.type === "drag-drop") {
-                        const savedAnswer = answers[nextQ.id];
-                        setDragItems(savedAnswer || [...(nextQ as DragDropQuestion).items]);
-                      } else if (nextQ.type === "matching") {
-                        const savedAnswer = answers[nextQ.id] || {};
-                        setMatches(savedAnswer);
-                        setSelectedLeft(null);
-                      } else if (nextQ.type === "logic-flow") {
-                        const savedAnswer = answers[nextQ.id] || [];
-                        setLogicAnswers(savedAnswer.length > 0 ? savedAnswer : new Array((nextQ as LogicFlowQuestion).blanks.length).fill(""));
-                      } else if (nextQ.type === "simulation") {
-                        const savedAnswer = answers[nextQ.id];
-                        setSimulationSteps(savedAnswer || [...(nextQ as SimulationQuestion).steps]);
-                      }
-                    }}
-                    className={`w-10 h-10 rounded-md text-sm font-medium transition-all ${
-                      currentQuestion === index ? "bg-blue-500 text-white ring-2 ring-blue-300" : isAnswered ? "bg-green-500 text-white" : "bg-gray-200 text-gray-700 hover:bg-gray-300"
-                    }`}
-                    title={`${q.difficulty} - ${q.points} poin`}
-                  >
-                    {index + 1}
-                  </button>
-                );
-              })}
+              <Button
+                className="bg-red-500 hover:bg-red-600 text-white font-semibold"
+                onClick={() => {
+                  const confirmExit = window.confirm("Yakin ingin keluar dari kuis?");
+                  if (confirmExit) {
+                    setViewMode("list");
+                    setSelectedQuiz(null);
+                    setCurrentQuestion(0);
+                    setAnswers({});
+                    setQuizQuestions([]);
+                    setTimeLeft(0);
+                  }
+                }}
+              >
+                Keluar Kuis
+              </Button>
             </div>
 
-            {currentQuestion === questions.length - 1 ? (
-              <Button className="bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 gap-2" onClick={handleSubmitQuiz} disabled={currentQ.type === "simulation" && !simulationRun}>
-                <Flag className="w-4 h-4" />
-                Submit Kuis
+            {/* TIMER + PROGRESS */}
+            <Card className="bg-gradient-to-r from-blue-500 to-purple-600 text-white shadow-lg">
+              <CardContent className="p-4">
+                <div className="flex justify-between mb-2">
+                  <div>
+                    <p className="text-sm opacity-90">Waktu Tersisa</p>
+                    <p className="text-2xl font-bold">{formatTime(timeLeft)}</p>
+                  </div>
+
+                  <div className="text-right">
+                    <p className="text-sm opacity-90">Progress</p>
+                    <p className="text-xl font-bold">
+                      {currentQuestion + 1}/{questions.length}
+                    </p>
+                  </div>
+                </div>
+
+                <Progress value={progress} className="h-2 bg-white/30" />
+              </CardContent>
+            </Card>
+
+            {/* QUESTION */}
+            <Card>
+              <CardContent className="p-6 space-y-6">
+                <div className="flex items-center gap-2">
+                  <Badge>Soal {currentQuestion + 1}</Badge>
+                  <Badge variant="secondary">{currentQ.difficulty}</Badge>
+
+                  <Badge className="ml-auto bg-yellow-400 text-black">{currentQ.points} poin</Badge>
+                </div>
+
+                <p className="text-lg font-semibold text-gray-800 mb-2">{currentQ.question}</p>
+
+                {/* MULTIPLE CHOICE */}
+                {currentQ.type === "multiple-choice" && (
+                  <div className="space-y-3">
+                    {currentQ.options.map((option: string, i: number) => {
+                      const selected = answers[currentQ.id] === i;
+
+                      return (
+                        <div
+                          key={i}
+                          onClick={() => setAnswers({ ...answers, [currentQ.id]: i })}
+                          className={`p-4 border rounded-lg cursor-pointer transition
+                          ${selected ? "border-blue-500 bg-blue-50" : "border-gray-200 hover:border-blue-300"}`}
+                        >
+                          {option}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {/* ESSAY */}
+                {currentQ.type === "essay" && (
+                  <Textarea
+                    value={answers[currentQ.id] || ""}
+                    onChange={(e) =>
+                      setAnswers({
+                        ...answers,
+                        [currentQ.id]: e.target.value,
+                      })
+                    }
+                    placeholder="Tulis jawaban anda..."
+                  />
+                )}
+              </CardContent>
+            </Card>
+
+            {/* NAVIGATION */}
+            <div className="flex justify-between">
+              <Button variant="outline" disabled={currentQuestion === 0} onClick={() => setCurrentQuestion(currentQuestion - 1)}>
+                Sebelumnya
               </Button>
-            ) : (
-              <Button onClick={handleNextQuestion} className="gap-2 bg-gradient-to-r from-blue-500 to-purple-500 hover:from-blue-600 hover:to-purple-600" disabled={currentQ.type === "simulation" && !simulationRun}>
-                Selanjutnya
-                <ChevronRight className="w-4 h-4" />
-              </Button>
-            )}
+
+              {currentQuestion < questions.length - 1 ? (
+                <Button onClick={() => setCurrentQuestion(currentQuestion + 1)}>Selanjutnya</Button>
+              ) : (
+                <Button className="bg-green-600 hover:bg-green-700" onClick={handleSubmitQuiz}>
+                  Selesai
+                </Button>
+              )}
+            </div>
           </div>
-        </div>
-      </DndProvider>
+        </DndProvider>
+      </div>
     );
   }
 
@@ -1786,59 +1463,69 @@ export function QuizPage() {
     const isPassed = quizResult.score >= 70;
 
     return (
-      <div className="space-y-6">
-        <Card className={`${isPassed ? "bg-gradient-to-br from-green-500 to-emerald-600" : "bg-gradient-to-br from-blue-500 to-indigo-600"} text-white`}>
-          <CardContent className="pt-8 pb-8 text-center">
-            <div className="mb-4">{isPassed ? <Trophy className="w-20 h-20 mx-auto text-yellow-300 animate-bounce" /> : <CheckCircle className="w-20 h-20 mx-auto text-white" />}</div>
-            <h2 className="text-white mb-2">{isPassed ? "🎉 Selamat! Kuis Selesai" : "✅ Kuis Selesai"}</h2>
-            <p className="text-sm mb-6 opacity-90">{isPassed ? "Anda berhasil menyelesaikan kuis dengan baik!" : "Kuis telah selesai dikerjakan. Terus semangat belajar!"}</p>
-
-            <div className="bg-white/20 backdrop-blur-sm rounded-lg p-6 mb-6">
-              <p className="text-sm opacity-90 mb-2">Nilai Anda</p>
-              <p className="text-6xl font-bold mb-2">{quizResult.score}</p>
-              <p className="text-sm opacity-90">
-                {quizResult.earnedPoints} dari {quizResult.totalPoints} poin • {quizResult.correct} dari {quizResult.total} soal benar
-              </p>
+      <>
+        {showSuccess && (
+          <div className="fixed top-5 right-5 z-[9999]">
+            <div className="flex items-center gap-3 bg-green-600 text-white px-5 py-3 rounded-xl shadow-2xl border border-green-700">
+              <span className="text-lg">✅</span>
+              <span className="font-semibold">Kuis berhasil diselesaikan!</span>
             </div>
+          </div>
+        )}
+        <div className="space-y-6">
+          <Card className={`${isPassed ? "bg-gradient-to-br from-green-500 to-emerald-600" : "bg-gradient-to-br from-blue-500 to-indigo-600"} text-white`}>
+            <CardContent className="pt-8 pb-8 text-center">
+              <div className="mb-4">{isPassed ? <Trophy className="w-20 h-20 mx-auto text-yellow-300 animate-bounce" /> : <CheckCircle className="w-20 h-20 mx-auto text-white" />}</div>
+              <h2 className="text-white mb-2">{isPassed ? "🎉 Selamat! Kuis Selesai" : "✅ Kuis Selesai"}</h2>
+              <p className="text-sm mb-6 opacity-90">{isPassed ? "Anda berhasil menyelesaikan kuis dengan baik!" : "Kuis telah selesai dikerjakan. Terus semangat belajar!"}</p>
 
-            <div className="grid grid-cols-3 gap-4 mb-6">
-              <div className="bg-white/20 backdrop-blur-sm rounded-lg p-4">
-                <CheckCircle2 className="w-6 h-6 mx-auto mb-2" />
-                <p className="text-sm opacity-90 mb-1">Benar</p>
-                <p className="text-xl font-bold">{quizResult.correct}</p>
+              <div className="bg-white/20 backdrop-blur-sm rounded-lg p-6 mb-6">
+                <p className="text-sm opacity-90 mb-2">Nilai Anda</p>
+                <p className="text-6xl font-bold mb-2">{quizResult.score}</p>
+                <p className="text-sm opacity-90">
+                  {quizResult.earnedPoints} dari {quizResult.totalPoints} poin • {quizResult.correct} dari {quizResult.total} soal benar
+                </p>
               </div>
-              <div className="bg-white/20 backdrop-blur-sm rounded-lg p-4">
-                <XCircle className="w-6 h-6 mx-auto mb-2" />
-                <p className="text-sm opacity-90 mb-1">Salah</p>
-                <p className="text-xl font-bold">{quizResult.total - quizResult.correct}</p>
-              </div>
-              <div className="bg-white/20 backdrop-blur-sm rounded-lg p-4">
-                <Award className="w-6 h-6 mx-auto mb-2" />
-                <p className="text-sm opacity-90 mb-1">Poin</p>
-                <p className="text-xl font-bold">+{quizResult.earnedPoints}</p>
-              </div>
-            </div>
 
-            {isPassed && <Badge className="bg-yellow-400 text-yellow-900 hover:bg-yellow-500 px-6 py-2 text-base">🏆 Badge: Quiz Master</Badge>}
-          </CardContent>
-        </Card>
+              <div className="grid grid-cols-3 gap-4 mb-6">
+                <div className="bg-white/20 backdrop-blur-sm rounded-lg p-4">
+                  <CheckCircle2 className="w-6 h-6 mx-auto mb-2" />
+                  <p className="text-sm opacity-90 mb-1">Benar</p>
+                  <p className="text-xl font-bold">{quizResult.correct}</p>
+                </div>
+                <div className="bg-white/20 backdrop-blur-sm rounded-lg p-4">
+                  <XCircle className="w-6 h-6 mx-auto mb-2" />
+                  <p className="text-sm opacity-90 mb-1">Salah</p>
+                  <p className="text-xl font-bold">{quizResult.total - quizResult.correct}</p>
+                </div>
+                <div className="bg-white/20 backdrop-blur-sm rounded-lg p-4">
+                  <Award className="w-6 h-6 mx-auto mb-2" />
+                  <p className="text-sm opacity-90 mb-1">Poin</p>
+                  <p className="text-xl font-bold">+{quizResult.earnedPoints}</p>
+                </div>
+              </div>
 
-        <div className="flex gap-4">
-          <Button
-            variant="outline"
-            className="flex-1"
-            onClick={() => {
-              setViewMode("list");
-              setSelectedQuiz(null);
-            }}
-          >
-            Kembali ke Daftar Kuis
-          </Button>
-          <Button className="flex-1 bg-gradient-to-r from-blue-500 to-purple-500 hover:from-blue-600 hover:to-purple-600" onClick={handleBeginQuiz}>
-            Kerjakan Ulang
-          </Button>
+              {isPassed && <Badge className="bg-yellow-400 text-yellow-900 hover:bg-yellow-500 px-6 py-2 text-base">🏆 Badge: Quiz Master</Badge>}
+            </CardContent>
+          </Card>
+
+          <div className="flex gap-4">
+            <Button
+              variant="outline"
+              className="flex-1"
+              onClick={() => {
+                setViewMode("list");
+                setSelectedQuiz(null);
+              }}
+            >
+              Kembali ke Daftar Kuis
+            </Button>
+            <Button className="flex-1 bg-gradient-to-r from-blue-500 to-purple-500 hover:from-blue-600 hover:to-purple-600" onClick={handleBeginQuiz}>
+              Kerjakan Ulang
+            </Button>
+          </div>
         </div>
-      </div>
+      </>
     );
   }
 

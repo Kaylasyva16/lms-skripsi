@@ -1,10 +1,11 @@
-import React, { useState } from "react";
+import { useEffect, useState } from "react";
 import { Plus, Search, Edit, Trash2, Copy, BarChart3, Eye } from "lucide-react";
 import QuizCreator from "./QuizCreator";
 
 interface Quiz {
   id: string;
   title: string;
+  kelas: string;
   description: string;
   totalQuestions: number;
   duration: number; // in minutes
@@ -25,50 +26,52 @@ export const TeacherQuiz: React.FC<TeacherQuizProps> = ({ onNavigate, onLogout }
   const [showCreator, setShowCreator] = useState(false);
   const [selectedQuiz, setSelectedQuiz] = useState<Quiz | null>(null);
   const [filterStatus, setFilterStatus] = useState<"all" | "draft" | "published">("all");
+  const [quizzes, setQuizzes] = useState<Quiz[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
 
-  // Mock data
-  const [quizzes, setQuizzes] = useState<Quiz[]>([
-    {
-      id: "1",
-      title: "Kuis Dasar Pemrograman",
-      description: "Kuis untuk menguji pemahaman konsep dasar pemrograman",
-      totalQuestions: 15,
-      duration: 30,
-      questionTypes: ["Multiple Choice", "Drag & Drop", "Matching"],
-      status: "published",
-      createdAt: "2024-11-15",
-      submissions: 28,
-      averageScore: 85,
-    },
-    {
-      id: "2",
-      title: "Debugging Challenge",
-      description: "Temukan dan perbaiki bug dalam kode",
-      totalQuestions: 10,
-      duration: 45,
-      questionTypes: ["Debugging Puzzle", "Logic Flow"],
-      status: "published",
-      createdAt: "2024-11-20",
-      submissions: 25,
-      averageScore: 78,
-    },
-    {
-      id: "3",
-      title: "Essay - Analisis Percabangan & Loop",
-      description: "Jawab pertanyaan essay tentang konsep, perbedaan, dan implementasi percabangan-perulangan",
-      totalQuestions: 5,
-      duration: 25,
-      questionTypes: ["Essay"],
-      status: "published",
-      createdAt: "2024-11-25",
-      submissions: 18,
-      averageScore: 82,
-    },
-  ]);
+  const token = localStorage.getItem("token");
+
+  const fetchQuizzes = async () => {
+    try {
+      setLoading(true);
+      setError("");
+
+      if (!token) {
+        throw new Error("Token login tidak ditemukan");
+      }
+
+      const res = await fetch("http://localhost:5000/api/quizzes", {
+        method: "GET",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      if (!res.ok) {
+        throw new Error("Gagal mengambil data kuis");
+      }
+
+      const data = await res.json();
+      console.log("DATA QUIZ:", data);
+      setQuizzes(data);
+    } catch (err: any) {
+      setError(err.message || "Terjadi kesalahan");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchQuizzes();
+  }, []);
 
   const filteredQuizzes = quizzes.filter((quiz) => {
     const matchesSearch = quiz.title.toLowerCase().includes(searchQuery.toLowerCase()) || quiz.description.toLowerCase().includes(searchQuery.toLowerCase());
+
     const matchesStatus = filterStatus === "all" || quiz.status === filterStatus;
+
     return matchesSearch && matchesStatus;
   });
 
@@ -82,41 +85,101 @@ export const TeacherQuiz: React.FC<TeacherQuizProps> = ({ onNavigate, onLogout }
     setShowCreator(true);
   };
 
-  const handleDeleteQuiz = (quizId: string) => {
-    if (confirm("Apakah Anda yakin ingin menghapus kuis ini?")) {
-      setQuizzes(quizzes.filter((q) => q.id !== quizId));
+  const handleDeleteQuiz = async (quizId: string) => {
+    const ok = confirm("Apakah Anda yakin ingin menghapus kuis ini?");
+    if (!ok) return;
+
+    try {
+      const res = await fetch(`http://localhost:5000/api/quizzes/${quizId}`, {
+        method: "DELETE",
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      if (!res.ok) {
+        throw new Error("Gagal menghapus kuis");
+      }
+
+      setQuizzes((prev) => prev.filter((q) => q.id !== quizId));
+    } catch (err: any) {
+      alert(err.message || "Terjadi kesalahan saat menghapus");
     }
   };
 
-  const handleDuplicateQuiz = (quiz: Quiz) => {
-    const newQuiz: Quiz = {
-      ...quiz,
-      id: Date.now().toString(),
-      title: `${quiz.title} (Copy)`,
-      status: "draft",
-      createdAt: new Date().toISOString().split("T")[0],
-      submissions: 0,
-      averageScore: 0,
-    };
-    setQuizzes([newQuiz, ...quizzes]);
+  const handleDuplicateQuiz = async (quiz: Quiz) => {
+    try {
+      const res = await fetch(`http://localhost:5000/api/quizzes/${quiz.id}/duplicate`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      if (!res.ok) {
+        throw new Error("Gagal menduplikasi kuis");
+      }
+
+      const newQuiz = await res.json();
+      setQuizzes((prev) => [newQuiz, ...prev]);
+    } catch (err: any) {
+      alert(err.message || "Terjadi kesalahan saat duplikasi");
+    }
   };
 
-  const handleSaveQuiz = (quizData: any) => {
-    if (selectedQuiz) {
-      // Update existing quiz
-      setQuizzes(quizzes.map((q) => (q.id === selectedQuiz.id ? { ...q, ...quizData } : q)));
-    } else {
-      // Create new quiz
-      const newQuiz: Quiz = {
-        id: Date.now().toString(),
-        ...quizData,
-        createdAt: new Date().toISOString().split("T")[0],
-        submissions: 0,
-        averageScore: 0,
-      };
-      setQuizzes([newQuiz, ...quizzes]);
+  const handleSaveQuiz = async (quizData: any) => {
+    try {
+      let savedQuiz;
+
+      if (selectedQuiz?.id || quizData.id) {
+        const quizId = selectedQuiz?.id || quizData.id;
+
+        const res = await fetch(`http://localhost:5000/api/quizzes/${quizId}`, {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify(quizData),
+        });
+
+        if (!res.ok) {
+          throw new Error("Gagal memperbarui kuis");
+        }
+
+        savedQuiz = await res.json();
+
+        setQuizzes((prev) => prev.map((q) => (String(q.id) === String(savedQuiz.id) ? savedQuiz : q)));
+      } else {
+        const res = await fetch("http://localhost:5000/api/quizzes", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify(quizData),
+        });
+
+        if (!res.ok) {
+          throw new Error("Gagal membuat kuis");
+        }
+
+        savedQuiz = await res.json();
+
+        setQuizzes((prev) => [savedQuiz, ...prev]);
+      }
+
+      if (savedQuiz.status === "published") {
+        setShowCreator(false);
+        setSelectedQuiz(null);
+        fetchQuizzes();
+      }
+
+      return savedQuiz;
+    } catch (err: any) {
+      throw new Error(err.message || "Terjadi kesalahan saat menyimpan");
     }
-    setShowCreator(false);
   };
 
   if (showCreator) {
@@ -125,6 +188,14 @@ export const TeacherQuiz: React.FC<TeacherQuizProps> = ({ onNavigate, onLogout }
         <QuizCreator quiz={selectedQuiz} onSave={handleSaveQuiz} onCancel={() => setShowCreator(false)} />
       </div>
     );
+  }
+
+  if (loading) {
+    return <div className="p-8">Memuat data kuis...</div>;
+  }
+
+  if (error) {
+    return <div className="p-8 text-red-500">{error}</div>;
   }
 
   return (
@@ -197,6 +268,9 @@ export const TeacherQuiz: React.FC<TeacherQuizProps> = ({ onNavigate, onLogout }
                         <h3 className="text-gray-800">{quiz.title}</h3>
                         <span className={`px-3 py-1 rounded-full text-sm ${quiz.status === "published" ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-600"}`}>{quiz.status === "published" ? "Dipublikasi" : "Draft"}</span>
                       </div>
+                      <p className="text-sm text-gray-500 mb-1">
+                        Kelas: <span className="text-gray-700">{quiz.kelas || "-"}</span>
+                      </p>
                       <p className="text-gray-600 mb-4">{quiz.description}</p>
 
                       {/* Quiz Info */}
@@ -225,7 +299,7 @@ export const TeacherQuiz: React.FC<TeacherQuizProps> = ({ onNavigate, onLogout }
 
                       {/* Question Types */}
                       <div className="flex flex-wrap gap-2 mt-4">
-                        {quiz.questionTypes.map((type, index) => (
+                        {(quiz.questionTypes || []).map((type, index) => (
                           <span key={index} className="px-3 py-1 bg-blue-50 text-blue-600 rounded-lg text-sm">
                             {type}
                           </span>
