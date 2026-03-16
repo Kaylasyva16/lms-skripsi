@@ -143,7 +143,8 @@ export function ProjectPage() {
       const data = await parseResponse(res);
 
       if (!res.ok) {
-        toast.error(data.message || "Gagal mengambil daftar siswa");
+        setErrorMessage(data.message || "Gagal mengambil daftar siswa");
+        setTimeout(() => setErrorMessage(""), 3000);
         setClassmates([]);
         return;
       }
@@ -151,7 +152,7 @@ export function ProjectPage() {
       setClassmates(Array.isArray(data) ? data : []);
     } catch (error) {
       console.error(error);
-      setErrorMessage(data.message || "Gagal mengambil daftar siswa");
+      setErrorMessage("Terjadi kesalahan saat mengambil daftar siswa");
       setTimeout(() => setErrorMessage(""), 3000);
       setClassmates([]);
     }
@@ -170,7 +171,6 @@ export function ProjectPage() {
       setClassmates([]);
     }
   }, [selectedProject]);
-
   const handleSaveMember = async () => {
     if (!selectedProject) return;
 
@@ -200,10 +200,12 @@ export function ProjectPage() {
         role: newMember.role,
       };
 
-      console.log("PAYLOAD ADD MEMBER:", payload);
+      console.log("SAVE MEMBER URL:", url);
+      console.log("SAVE MEMBER METHOD:", method);
+      console.log("SAVE MEMBER PAYLOAD:", payload);
 
-      const res = await fetch(`http://localhost:5000/api/student/projects/${selectedProject.id}/group/members`, {
-        method: "POST",
+      const res = await fetch(url, {
+        method,
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
@@ -212,11 +214,11 @@ export function ProjectPage() {
       });
 
       const data = await parseResponse(res);
-      console.log("ADD MEMBER STATUS:", res.status);
-      console.log("ADD MEMBER RESPONSE:", data);
+      console.log("SAVE MEMBER STATUS:", res.status);
+      console.log("SAVE MEMBER RESPONSE:", data);
 
       if (!res.ok) {
-        const safeMessage = typeof data.message === "string" && !data.message.includes("<!DOCTYPE") ? data.message : "Gagal menambahkan anggota";
+        const safeMessage = typeof data.message === "string" && !data.message.includes("<!DOCTYPE") ? data.message : isEdit ? "Gagal mengubah anggota" : "Gagal menambahkan anggota";
 
         setErrorMessage(safeMessage);
         setTimeout(() => setErrorMessage(""), 3000);
@@ -300,9 +302,8 @@ export function ProjectPage() {
     if (status === "completed") return "bg-green-500 hover:bg-green-600";
     return "bg-gray-400 hover:bg-gray-500";
   };
-
-  if (showDetail) {
-    return <ProjectDetailPage onClose={() => setShowDetail(false)} />;
+  if (showDetail && selectedProject) {
+    return <ProjectDetailPage projectId={selectedProject.id} onClose={() => setShowDetail(false)} />;
   }
 
   if (loading) {
@@ -472,8 +473,8 @@ export function ProjectPage() {
 
                 <DialogContent className="sm:max-w-[425px]">
                   <DialogHeader>
-                    <DialogTitle>Tambah Anggota Kelompok</DialogTitle>
-                    <DialogDescription>Pilih siswa untuk dimasukkan ke kelompok</DialogDescription>
+                    <DialogTitle>{editingMember ? "Edit Anggota Kelompok" : "Tambah Anggota Kelompok"}</DialogTitle>
+                    <DialogDescription>{editingMember ? "Ubah data anggota kelompok" : "Pilih siswa untuk dimasukkan ke kelompok"}</DialogDescription>
                   </DialogHeader>
 
                   <div className="flex flex-col gap-5 py-4">
@@ -551,7 +552,7 @@ export function ProjectPage() {
                       Batal
                     </Button>
                     <Button className="bg-green-500 hover:bg-green-600" onClick={handleSaveMember}>
-                      {editingMember ? "Simpan" : "Tambah"}
+                      {editingMember ? "Edit Anggota Kelompok" : "Tambah Anggota Kelompok"}
                     </Button>
                   </DialogFooter>
                 </DialogContent>

@@ -40,7 +40,22 @@ const storage = multer.diskStorage({
   },
 });
 
-const upload = multer({ storage });
+const upload = multer({
+  storage,
+  limits: {
+    fileSize: 10 * 1024 * 1024,
+  },
+  fileFilter: (req, file, cb) => {
+    const allowedExt = [".pdf", ".doc", ".docx", ".png", ".jpg", ".jpeg", ".zip"];
+    const ext = path.extname(file.originalname).toLowerCase();
+
+    if (!allowedExt.includes(ext)) {
+      return cb(new Error("Tipe file tidak didukung"));
+    }
+
+    cb(null, true);
+  },
+});
 
 app.use("/uploads", express.static("uploads"));
 
@@ -2037,6 +2052,8 @@ app.get("/api/projects", authenticateToken, authorizeRole(["guru"]), async (req,
 });
 
 app.post("/api/projects", authenticateToken, authorizeRole(["guru"]), async (req, res) => {
+  const client = await pool.connect();
+
   try {
     const { title, classId, type, deadline, description, membersPerGroup } = req.body;
 
@@ -2044,7 +2061,9 @@ app.post("/api/projects", authenticateToken, authorizeRole(["guru"]), async (req
       return res.status(400).json({ message: "Data proyek belum lengkap" });
     }
 
-    const result = await pool.query(
+    await client.query("BEGIN");
+
+    const result = await client.query(
       `
       INSERT INTO projects
       (title, class_id, type, deadline, description, members_per_group, status, created_by)
@@ -2065,15 +2084,98 @@ app.post("/api/projects", authenticateToken, authorizeRole(["guru"]), async (req
 
     const project = result.rows[0];
 
-    const kelasResult = await pool.query(`SELECT nama FROM kelas WHERE id = $1`, [project.classId]);
+    const defaultSyntaxes = [
+      {
+        syntaxNo: 1,
+        title: "Sintaks 1: Identifikasi Masalah",
+        description: "Mengidentifikasi masalah yang akan diselesaikan",
+        stages: [
+          { stageNo: 1, title: "Tahap 1: Orientasi", subtitle: "Memahami konteks permasalahan", instruction: "Jelaskan konteks masalah.", allowFileUpload: false },
+          { stageNo: 2, title: "Tahap 2: Rencana", subtitle: "Merumuskan rencana secara jelas", instruction: "Jelaskan rencana penyelesaian masalah.", allowFileUpload: true },
+          { stageNo: 3, title: "Tahap 3: Memvalidasi", subtitle: "Validasi dan kelengkapan", instruction: "Tuliskan indikator keberhasilan.", allowFileUpload: false },
+          { stageNo: 4, title: "Tahap 4: Analisis", subtitle: "Analisis permasalahan", instruction: "Analisis kebutuhan dan proses.", allowFileUpload: false },
+        ],
+      },
+      {
+        syntaxNo: 2,
+        title: "Sintaks 2: Perencanaan Proyek",
+        description: "Membuat perencanaan proyek secara detail",
+        stages: [
+          { stageNo: 1, title: "Tahap 1: Tujuan dan Deskripsi Proyek", subtitle: "Menentukan tujuan proyek", instruction: "Tuliskan tujuan dan deskripsi proyek.", allowFileUpload: false },
+          { stageNo: 2, title: "Tahap 2: Menentukan Fitur Proyek", subtitle: "Menentukan fitur utama", instruction: "Tuliskan fitur utama proyek.", allowFileUpload: false },
+          { stageNo: 3, title: "Tahap 3: Menentukan Tools & Bahasa", subtitle: "Memilih tools dan bahasa", instruction: "Tuliskan tools dan bahasa yang digunakan.", allowFileUpload: false },
+        ],
+      },
+      {
+        syntaxNo: 3,
+        title: "Sintaks 3: Penyusunan Jadwal",
+        description: "Menyusun timeline dan jadwal pengerjaan",
+        stages: [
+          { stageNo: 1, title: "Tahap 1: Menentukan Durasi Proyek", subtitle: "Menentukan durasi proyek", instruction: "Tuliskan estimasi durasi proyek.", allowFileUpload: false },
+          { stageNo: 2, title: "Tahap 2: Pembagian Tugas Anggota", subtitle: "Membagi tugas anggota", instruction: "Jelaskan pembagian tugas anggota.", allowFileUpload: false },
+          { stageNo: 3, title: "Tahap 3: Menyusun Timeline", subtitle: "Membuat timeline detail", instruction: "Tuliskan timeline pengerjaan proyek.", allowFileUpload: false },
+        ],
+      },
+      {
+        syntaxNo: 4,
+        title: "Sintaks 4: Pelaksanaan Proyek",
+        description: "Mengimplementasikan proyek sesuai rencana",
+        stages: [
+          { stageNo: 1, title: "Tahap 1: Log Aktivitas 1", subtitle: "Catatan aktivitas pengerjaan", instruction: "Tuliskan aktivitas pelaksanaan proyek.", allowFileUpload: false },
+          { stageNo: 2, title: "Tahap 2: Log Aktivitas 2", subtitle: "Catatan aktivitas lanjutan", instruction: "Tuliskan aktivitas lanjutan.", allowFileUpload: false },
+          { stageNo: 3, title: "Tahap 3: Log Aktivitas 3", subtitle: "Catatan perkembangan proyek", instruction: "Tuliskan perkembangan proyek.", allowFileUpload: false },
+          { stageNo: 4, title: "Tahap 4: Log Aktivitas 4", subtitle: "Finalisasi pelaksanaan", instruction: "Tuliskan finalisasi pelaksanaan proyek.", allowFileUpload: false },
+        ],
+      },
+      {
+        syntaxNo: 5,
+        title: "Sintaks 5: Evaluasi & Refleksi",
+        description: "Melakukan evaluasi dan refleksi proyek",
+        stages: [
+          { stageNo: 1, title: "Tahap 1: Evaluasi Hasil", subtitle: "Evaluasi hasil proyek", instruction: "Tuliskan evaluasi hasil proyek.", allowFileUpload: false },
+          { stageNo: 2, title: "Tahap 2: Revisi Proyek", subtitle: "Melakukan revisi bila perlu", instruction: "Tuliskan revisi yang dilakukan.", allowFileUpload: false },
+          { stageNo: 3, title: "Tahap 3: Refleksi Pembelajaran", subtitle: "Refleksi proses belajar", instruction: "Tuliskan refleksi pembelajaran.", allowFileUpload: false },
+        ],
+      },
+    ];
+
+    for (const syntax of defaultSyntaxes) {
+      const syntaxResult = await client.query(
+        `
+        INSERT INTO project_syntaxes (project_id, syntax_no, title, description, is_locked)
+        VALUES ($1, $2, $3, $4, $5)
+        RETURNING id
+        `,
+        [project.id, syntax.syntaxNo, syntax.title, syntax.description, syntax.syntaxNo === 1 ? false : true]
+      );
+
+      const syntaxId = syntaxResult.rows[0].id;
+
+      for (const stage of syntax.stages) {
+        await client.query(
+          `
+          INSERT INTO project_stages (syntax_id, stage_no, title, subtitle, instruction, allow_file_upload)
+          VALUES ($1, $2, $3, $4, $5, $6)
+          `,
+          [syntaxId, stage.stageNo, stage.title, stage.subtitle, stage.instruction, stage.allowFileUpload]
+        );
+      }
+    }
+
+    const kelasResult = await client.query(`SELECT nama FROM kelas WHERE id = $1`, [project.classId]);
+
+    await client.query("COMMIT");
 
     res.status(201).json({
       ...project,
       class: kelasResult.rows[0]?.nama || "-",
     });
   } catch (err) {
+    await client.query("ROLLBACK");
     console.error("CREATE PROJECT ERROR:", err);
     res.status(500).json({ error: err.message });
+  } finally {
+    client.release();
   }
 });
 
@@ -2136,8 +2238,9 @@ app.get("/api/student/projects/:projectId/group", authenticateToken, authorizeRo
         pg.created_by AS "createdBy",
         pg.created_at AS "createdAt"
       FROM project_groups pg
+      JOIN project_group_members pgm ON pgm.group_id = pg.id
       WHERE pg.project_id = $1
-        AND pg.created_by = $2
+        AND pgm.student_id = $2
       LIMIT 1
       `,
       [projectId, req.user.id]
@@ -2179,8 +2282,11 @@ app.get("/api/student/projects/:projectId/group", authenticateToken, authorizeRo
       members,
     });
   } catch (err) {
-    console.error("GET PROJECT GROUP ERROR:", err);
-    res.status(500).json({ error: err.message });
+    console.error("GET PROJECT GROUP ERROR FULL:", err);
+    res.status(500).json({
+      message: "GET PROJECT GROUP ERROR",
+      error: err.message,
+    });
   }
 });
 
@@ -2277,6 +2383,7 @@ app.post("/api/student/projects/:projectId/group/members", authenticateToken, au
     );
 
     let groupId;
+    let isNewGroup = false;
 
     if (groupResult.rows.length === 0) {
       const createGroupResult = await client.query(
@@ -2289,8 +2396,19 @@ app.post("/api/student/projects/:projectId/group/members", authenticateToken, au
       );
 
       groupId = createGroupResult.rows[0].id;
+      isNewGroup = true;
     } else {
       groupId = groupResult.rows[0].id;
+    }
+
+    if (isNewGroup) {
+      await client.query(
+        `
+        INSERT INTO project_group_members (group_id, student_id, role, member_role)
+        VALUES ($1, $2, 'Ketua', 'Project Leader')
+        `,
+        [groupId, req.user.id]
+      );
     }
 
     const countResult = await client.query(
@@ -2479,6 +2597,841 @@ app.put("/api/student/group-members/:memberId", authenticateToken, authorizeRole
     res.json({ message: "Anggota berhasil diupdate" });
   } catch (err) {
     console.error("UPDATE MEMBER ERROR:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/* ================= PROJECT DETAIL ================= */
+app.get("/api/student/projects/:projectId/detail", authenticateToken, authorizeRole(["siswa"]), async (req, res) => {
+  try {
+    const { projectId } = req.params;
+
+    const siswaResult = await pool.query(
+      `
+      SELECT id, nama, kelas
+      FROM users
+      WHERE id = $1 AND role = 'siswa'
+      `,
+      [req.user.id]
+    );
+
+    if (siswaResult.rows.length === 0) {
+      return res.status(404).json({ message: "Siswa tidak ditemukan" });
+    }
+
+    const siswa = siswaResult.rows[0];
+
+    const projectResult = await pool.query(
+      `
+      SELECT
+        p.id,
+        p.title,
+        p.description,
+        p.status,
+        k.nama AS class
+      FROM projects p
+      JOIN kelas k ON k.id = p.class_id
+      WHERE p.id = $1
+      `,
+      [projectId]
+    );
+
+    if (projectResult.rows.length === 0) {
+      return res.status(404).json({ message: "Project tidak ditemukan" });
+    }
+
+    const project = projectResult.rows[0];
+
+    if (project.class !== siswa.kelas) {
+      return res.status(403).json({ message: "Project ini bukan untuk kelas kamu" });
+    }
+
+    const groupResult = await pool.query(
+      `
+      SELECT
+        pg.id,
+        pg.group_name AS "groupName"
+      FROM project_groups pg
+      JOIN project_group_members pgm ON pgm.group_id = pg.id
+      WHERE pg.project_id = $1
+        AND pgm.student_id = $2
+      LIMIT 1
+      `,
+      [projectId, req.user.id]
+    );
+
+    if (groupResult.rows.length === 0) {
+      return res.json({
+        project,
+        group: null,
+        teamMembers: [],
+        overallProgress: { completed: 0, total: 0, percentage: 0 },
+        syntaxes: [],
+      });
+    }
+
+    const group = groupResult.rows[0];
+
+    const membersResult = await pool.query(
+      `
+      SELECT
+        u.id,
+        u.nama AS name,
+        pgm.member_role AS role
+      FROM project_group_members pgm
+      JOIN users u ON u.id = pgm.student_id
+      WHERE pgm.group_id = $1
+      ORDER BY u.nama ASC
+      `,
+      [group.id]
+    );
+
+    const syntaxesResult = await pool.query(
+      `
+      SELECT
+        ps.id,
+        ps.syntax_no AS "syntaxNo",
+        ps.title,
+        ps.description,
+        ps.is_locked AS "isLocked"
+      FROM project_syntaxes ps
+      WHERE ps.project_id = $1
+      ORDER BY ps.syntax_no ASC
+      `,
+      [projectId]
+    );
+
+    const stagesResult = await pool.query(
+      `
+      SELECT
+        pst.id,
+        pst.syntax_id AS "syntaxId",
+        pst.stage_no AS "stageNo",
+        pst.title,
+        pst.subtitle,
+        pst.instruction,
+        pst.allow_file_upload AS "allowFileUpload",
+        sub.id AS "submissionId",
+        sub.answer,
+        sub.status,
+        fb.feedback_text AS "feedbackText"
+      FROM project_stages pst
+      LEFT JOIN project_stage_submissions sub
+        ON sub.stage_id = pst.id
+       AND sub.group_id = $1
+      LEFT JOIN project_stage_feedback fb
+        ON fb.submission_id = sub.id
+      WHERE pst.syntax_id IN (
+        SELECT id FROM project_syntaxes WHERE project_id = $2
+      )
+      ORDER BY pst.syntax_id ASC, pst.stage_no ASC
+      `,
+      [group.id, projectId]
+    );
+
+    const filesResult = await pool.query(
+      `
+      SELECT
+        psf.id,
+        psf.submission_id AS "submissionId",
+        psf.file_name AS "fileName",
+        psf.file_url AS "fileUrl",
+        psf.file_size AS "fileSize"
+      FROM project_stage_files psf
+      WHERE psf.submission_id IN (
+        SELECT id
+        FROM project_stage_submissions
+        WHERE group_id = $1
+      )
+      `,
+      [group.id]
+    );
+
+    const rawSyntaxes = syntaxesResult.rows.map((syntax) => {
+      const syntaxStages = stagesResult.rows
+        .filter((stage) => stage.syntaxId === syntax.id)
+        .map((stage) => ({
+          id: stage.id,
+          stageNo: stage.stageNo,
+          title: stage.title,
+          subtitle: stage.subtitle,
+          instruction: stage.instruction,
+          allowFileUpload: stage.allowFileUpload,
+          submissionId: stage.submissionId,
+          answer: stage.answer || "",
+          status: stage.status || "belum_mengerjakan",
+          feedbackText: stage.feedbackText || null,
+          files: filesResult.rows.filter((file) => file.submissionId === stage.submissionId),
+        }));
+
+      const progressCount = syntaxStages.filter((stage) => stage.status === "belum_selesai" || stage.status === "selesai").length;
+
+      const allFilled = syntaxStages.length > 0 && syntaxStages.every((stage) => stage.status === "belum_selesai" || stage.status === "selesai");
+
+      const allValidated = syntaxStages.length > 0 && syntaxStages.every((stage) => stage.status === "selesai");
+
+      return {
+        id: syntax.id,
+        syntaxNo: syntax.syntaxNo,
+        title: syntax.title,
+        subtitle: syntax.title,
+        description: syntax.description,
+        isLocked: syntax.isLocked,
+        progress: {
+          completed: progressCount,
+          total: syntaxStages.length,
+        },
+        allFilled,
+        allValidated,
+        stages: syntaxStages,
+      };
+    });
+
+    const syntaxes = rawSyntaxes.map((syntax, index) => {
+      const prevSyntax = rawSyntaxes[index - 1];
+      const unlocked = index === 0 ? true : prevSyntax?.allFilled === true;
+
+      let status = "belum_selesai";
+
+      if (!unlocked) {
+        status = "terkunci";
+      } else if (syntax.allFilled) {
+        status = "selesai";
+      } else {
+        status = "belum_selesai";
+      }
+
+      return {
+        id: syntax.id,
+        syntaxNo: syntax.syntaxNo,
+        title: syntax.title,
+        subtitle: syntax.subtitle,
+        description: syntax.description,
+        unlocked,
+        status,
+        progress: syntax.progress,
+        stages: syntax.stages,
+      };
+    });
+
+    const totalStages = syntaxes.flatMap((s) => s.stages).length;
+
+    const completedStages = syntaxes.flatMap((s) => s.stages).filter((stage) => stage.status === "belum_selesai" || stage.status === "selesai").length;
+
+    res.json({
+      project: {
+        id: project.id,
+        title: project.title,
+        description: project.description,
+        status: project.status,
+        groupName: group.groupName,
+      },
+      teamMembers: membersResult.rows.map((m) => ({
+        ...m,
+        initials: m.name
+          .split(" ")
+          .map((x) => x[0])
+          .join("")
+          .slice(0, 2)
+          .toUpperCase(),
+      })),
+      overallProgress: {
+        completed: completedStages,
+        total: totalStages,
+        percentage: totalStages === 0 ? 0 : Math.round((completedStages / totalStages) * 100),
+      },
+      syntaxes,
+    });
+  } catch (err) {
+    console.error("GET PROJECT DETAIL ERROR FULL:", err);
+    console.error("MESSAGE:", err.message);
+    console.error("STACK:", err.stack);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+//save jawaban siswa
+app.put("/api/student/stages/:stageId/submission", authenticateToken, authorizeRole(["siswa"]), async (req, res) => {
+  const client = await pool.connect();
+
+  try {
+    const { stageId } = req.params;
+    const { projectId, answer, status } = req.body;
+
+    await client.query("BEGIN");
+
+    const groupResult = await client.query(
+      `
+      SELECT pg.id
+      FROM project_groups pg
+      JOIN project_group_members pgm ON pgm.group_id = pg.id
+      WHERE pg.project_id = $1
+        AND pgm.student_id = $2
+      LIMIT 1
+      `,
+      [projectId, req.user.id]
+    );
+
+    if (groupResult.rows.length === 0) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ message: "Kelompok project tidak ditemukan" });
+    }
+
+    const groupId = groupResult.rows[0].id;
+
+    const stageInfoResult = await client.query(
+      `
+      SELECT
+        pst.id AS "stageId",
+        pst.syntax_id AS "syntaxId",
+        ps.project_id AS "projectId",
+        ps.syntax_no AS "syntaxNo"
+      FROM project_stages pst
+      JOIN project_syntaxes ps ON ps.id = pst.syntax_id
+      WHERE pst.id = $1
+        AND ps.project_id = $2
+      LIMIT 1
+      `,
+      [stageId, projectId]
+    );
+
+    if (stageInfoResult.rows.length === 0) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ message: "Tahap tidak ditemukan" });
+    }
+
+    const currentStage = stageInfoResult.rows[0];
+    const currentSyntaxNo = Number(currentStage.syntaxNo);
+
+    // syntax 1 selalu boleh
+    if (currentSyntaxNo > 1) {
+      const prevSyntaxResult = await client.query(
+        `
+        SELECT id
+        FROM project_syntaxes
+        WHERE project_id = $1
+          AND syntax_no = $2
+        LIMIT 1
+        `,
+        [projectId, currentSyntaxNo - 1]
+      );
+
+      if (prevSyntaxResult.rows.length === 0) {
+        await client.query("ROLLBACK");
+        return res.status(400).json({ message: "Sintaks sebelumnya tidak ditemukan" });
+      }
+
+      const prevSyntaxId = prevSyntaxResult.rows[0].id;
+
+      const prevStagesResult = await client.query(
+        `
+        SELECT
+          pst.id,
+          COALESCE(pss.status, 'belum_mengerjakan') AS status
+        FROM project_stages pst
+        LEFT JOIN project_stage_submissions pss
+          ON pss.stage_id = pst.id
+         AND pss.group_id = $1
+        WHERE pst.syntax_id = $2
+        ORDER BY pst.stage_no ASC
+        `,
+        [groupId, prevSyntaxId]
+      );
+
+      const prevSyntaxFilled = prevStagesResult.rows.length > 0 && prevStagesResult.rows.every((row) => row.status === "belum_selesai" || row.status === "selesai");
+
+      if (!prevSyntaxFilled) {
+        await client.query("ROLLBACK");
+        return res.status(403).json({
+          message: "Sintaks ini masih terkunci. Selesaikan sintaks sebelumnya dulu.",
+        });
+      }
+    }
+
+    const finalStatus = answer && answer.trim() ? "belum_selesai" : "belum_mengerjakan";
+
+    const result = await client.query(
+      `
+      INSERT INTO project_stage_submissions (stage_id, group_id, answer, status, submitted_at, updated_at)
+      VALUES ($1,$2,$3,$4,NOW(),NOW())
+      ON CONFLICT (stage_id, group_id)
+      DO UPDATE SET
+        answer = EXCLUDED.answer,
+        status = EXCLUDED.status,
+        updated_at = NOW()
+      RETURNING *
+      `,
+      [stageId, groupId, answer || "", status || finalStatus]
+    );
+
+    await client.query("COMMIT");
+    res.json(result.rows[0]);
+  } catch (err) {
+    await client.query("ROLLBACK");
+    console.error("SAVE SUBMISSION ERROR:", err);
+    res.status(500).json({ error: err.message });
+  } finally {
+    client.release();
+  }
+});
+
+//upload file tahap
+app.post("/api/student/stages/:stageId/files", authenticateToken, authorizeRole(["siswa"]), upload.single("file"), async (req, res) => {
+  const client = await pool.connect();
+
+  try {
+    const { stageId } = req.params;
+    const { projectId } = req.body;
+
+    if (!req.file) {
+      return res.status(400).json({ message: "File wajib diupload" });
+    }
+
+    await client.query("BEGIN");
+
+    const groupResult = await client.query(
+      `
+      SELECT pg.id
+      FROM project_groups pg
+      JOIN project_group_members pgm ON pgm.group_id = pg.id
+      WHERE pg.project_id = $1
+        AND pgm.student_id = $2
+      LIMIT 1
+      `,
+      [projectId, req.user.id]
+    );
+
+    if (groupResult.rows.length === 0) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ message: "Kelompok tidak ditemukan" });
+    }
+
+    const groupId = groupResult.rows[0].id;
+
+    const stageCheck = await client.query(
+      `
+      SELECT
+        pst.id,
+        pst.syntax_id AS "syntaxId",
+        ps.project_id AS "projectId",
+        ps.syntax_no AS "syntaxNo",
+        ps.is_locked AS "isLocked"
+      FROM project_stages pst
+      JOIN project_syntaxes ps ON ps.id = pst.syntax_id
+      WHERE pst.id = $1
+      `,
+      [stageId]
+    );
+
+    if (stageCheck.rows.length === 0) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ message: "Stage tidak ditemukan" });
+    }
+
+    const currentStage = stageCheck.rows[0];
+
+    if (Number(currentStage.projectId) !== Number(projectId)) {
+      await client.query("ROLLBACK");
+      return res.status(403).json({ message: "Stage tidak sesuai project" });
+    }
+
+    if (currentStage.isLocked) {
+      await client.query("ROLLBACK");
+      return res.status(403).json({ message: "Sintaks ini masih terkunci" });
+    }
+
+    let submissionResult = await client.query(
+      `
+      SELECT id
+      FROM project_stage_submissions
+      WHERE stage_id = $1 AND group_id = $2
+      `,
+      [stageId, groupId]
+    );
+
+    let submissionId;
+
+    if (submissionResult.rows.length === 0) {
+      const insertSubmission = await client.query(
+        `
+        INSERT INTO project_stage_submissions (stage_id, group_id, answer, status, submitted_at, updated_at)
+        VALUES ($1,$2,'','belum_selesai',NOW(),NOW())
+        RETURNING id
+        `,
+        [stageId, groupId]
+      );
+      submissionId = insertSubmission.rows[0].id;
+    } else {
+      submissionId = submissionResult.rows[0].id;
+
+      await client.query(
+        `
+        UPDATE project_stage_submissions
+        SET status = 'belum_selesai',
+            updated_at = NOW()
+        WHERE id = $1
+        `,
+        [submissionId]
+      );
+    }
+
+    const fileResult = await client.query(
+      `
+      INSERT INTO project_stage_files (submission_id, file_name, file_url, file_size, uploaded_by)
+      VALUES ($1,$2,$3,$4,$5)
+      RETURNING *
+      `,
+      [submissionId, req.file.originalname, req.file.filename, req.file.size, req.user.id]
+    );
+
+    // cek apakah syntax ini sudah penuh terisi
+    const syntaxProgress = await client.query(
+      `
+      SELECT
+        COUNT(pst.id)::int AS total_stages,
+        COUNT(CASE WHEN pss.status IN ('belum_selesai', 'selesai') THEN 1 END)::int AS filled_stages
+      FROM project_stages pst
+      LEFT JOIN project_stage_submissions pss
+        ON pss.stage_id = pst.id
+       AND pss.group_id = $1
+      WHERE pst.syntax_id = $2
+      `,
+      [groupId, currentStage.syntaxId]
+    );
+
+    const totalStages = syntaxProgress.rows[0].total_stages;
+    const filledStages = syntaxProgress.rows[0].filled_stages;
+
+    if (totalStages > 0 && filledStages === totalStages) {
+      await client.query(
+        `
+        UPDATE project_syntaxes
+        SET is_locked = false
+        WHERE project_id = $1
+          AND syntax_no = $2
+        `,
+        [projectId, currentStage.syntaxNo + 1]
+      );
+    }
+
+    await client.query("COMMIT");
+    res.status(201).json(fileResult.rows[0]);
+  } catch (err) {
+    await client.query("ROLLBACK");
+    console.error("UPLOAD STAGE FILE ERROR:", err);
+    res.status(500).json({ error: err.message });
+  } finally {
+    client.release();
+  }
+});
+
+//feedback guru
+app.put("/api/guru/submissions/:submissionId/feedback", authenticateToken, authorizeRole(["guru"]), async (req, res) => {
+  try {
+    const { submissionId } = req.params;
+    const { feedbackText } = req.body;
+
+    const result = await pool.query(
+      `
+      INSERT INTO project_stage_feedback (submission_id, teacher_id, feedback_text, created_at, updated_at)
+      VALUES ($1,$2,$3,NOW(),NOW())
+      ON CONFLICT (submission_id)
+      DO UPDATE SET
+        feedback_text = EXCLUDED.feedback_text,
+        teacher_id = EXCLUDED.teacher_id,
+        updated_at = NOW()
+      RETURNING *
+      `,
+      [submissionId, req.user.id, feedbackText]
+    );
+
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error("SAVE FEEDBACK ERROR:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.delete("/api/student/stage-files/:fileId", authenticateToken, authorizeRole(["siswa"]), async (req, res) => {
+  const client = await pool.connect();
+
+  try {
+    const { fileId } = req.params;
+
+    await client.query("BEGIN");
+
+    const fileCheck = await client.query(
+      `
+      SELECT
+        psf.id,
+        psf.file_url AS "fileUrl",
+        pss.group_id AS "groupId"
+      FROM project_stage_files psf
+      JOIN project_stage_submissions pss ON pss.id = psf.submission_id
+      JOIN project_group_members pgm ON pgm.group_id = pss.group_id
+      WHERE psf.id = $1
+        AND pgm.student_id = $2
+      LIMIT 1
+      `,
+      [fileId, req.user.id]
+    );
+
+    if (fileCheck.rows.length === 0) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ message: "File tidak ditemukan atau tidak bisa dihapus" });
+    }
+
+    const file = fileCheck.rows[0];
+
+    await client.query(
+      `
+      DELETE FROM project_stage_files
+      WHERE id = $1
+      `,
+      [fileId]
+    );
+
+    const filePath = path.join(process.cwd(), "uploads", file.fileUrl);
+    if (fs.existsSync(filePath)) {
+      fs.unlinkSync(filePath);
+    }
+
+    await client.query("COMMIT");
+
+    res.json({ message: "File berhasil dihapus" });
+  } catch (err) {
+    await client.query("ROLLBACK");
+    console.error("DELETE STAGE FILE ERROR:", err);
+    res.status(500).json({ error: err.message });
+  } finally {
+    client.release();
+  }
+});
+
+/* ================= MONITORING GURU ================= */
+app.get("/api/guru/projects/:projectId/monitoring", authenticateToken, authorizeRole(["guru"]), async (req, res) => {
+  try {
+    const { projectId } = req.params;
+
+    // pastikan project milik guru login
+    const projectResult = await pool.query(
+      `
+      SELECT
+        p.id,
+        p.title,
+        p.description,
+        p.status,
+        p.class_id AS "classId",
+        k.nama AS class
+      FROM projects p
+      JOIN kelas k ON k.id = p.class_id
+      WHERE p.id = $1
+        AND p.created_by = $2
+      `,
+      [projectId, req.user.id]
+    );
+
+    if (projectResult.rows.length === 0) {
+      return res.status(404).json({ message: "Project tidak ditemukan atau bukan milik guru ini" });
+    }
+
+    const project = projectResult.rows[0];
+
+    const groupsResult = await pool.query(
+      `
+      SELECT
+        pg.id,
+        pg.group_name AS "groupName",
+        pg.created_by AS "createdBy",
+        pg.created_at AS "createdAt"
+      FROM project_groups pg
+      WHERE pg.project_id = $1
+      ORDER BY pg.id ASC
+      `,
+      [projectId]
+    );
+
+    const submissionsResult = await pool.query(
+      `
+      SELECT
+        pss.id,
+        pss.stage_id AS "stageId",
+        pss.group_id AS "groupId",
+        pss.answer,
+        pss.status,
+        pss.submitted_at AS "submittedAt",
+        pss.updated_at AS "updatedAt",
+        psf.feedback_text AS "feedbackText",
+        psf.teacher_id AS "teacherId"
+      FROM project_stage_submissions pss
+      LEFT JOIN project_stage_feedback psf
+        ON psf.submission_id = pss.id
+      WHERE pss.group_id IN (
+        SELECT id FROM project_groups WHERE project_id = $1
+      )
+      `,
+      [projectId]
+    );
+
+    const membersResult = await pool.query(
+      `
+      SELECT
+        pgm.group_id AS "groupId",
+        u.id,
+        u.nama AS name,
+        u.nis,
+        pgm.role AS status,
+        pgm.member_role AS role
+      FROM project_group_members pgm
+      JOIN users u ON u.id = pgm.student_id
+      WHERE pgm.group_id IN (
+        SELECT id FROM project_groups WHERE project_id = $1
+      )
+      ORDER BY pgm.group_id ASC, u.nama ASC
+      `,
+      [projectId]
+    );
+
+    const groups = groupsResult.rows.map((group) => {
+      const groupMembers = membersResult.rows
+        .filter((member) => member.groupId === group.id)
+        .map((member) => ({
+          id: member.id,
+          name: member.name,
+          nis: member.nis,
+          status: member.status,
+          role: member.role,
+          initials: member.name
+            .split(" ")
+            .map((x) => x[0])
+            .join("")
+            .slice(0, 2)
+            .toUpperCase(),
+        }));
+
+      const syntaxes = syntaxesResult.rows.map((syntax) => {
+        const syntaxStages = stagesResult.rows
+          .filter((stage) => stage.syntaxId === syntax.id)
+          .map((stage) => {
+            const submission = submissionsResult.rows.find((sub) => sub.groupId === group.id && sub.stageId === stage.id);
+
+            const files = submission ? filesResult.rows.filter((file) => file.submissionId === submission.id) : [];
+
+            return {
+              id: stage.id,
+              stageNo: stage.stageNo,
+              title: stage.title,
+              subtitle: stage.subtitle,
+              instruction: stage.instruction,
+              allowFileUpload: stage.allowFileUpload,
+              submissionId: submission?.id || null,
+              answer: submission?.answer || "",
+              status: submission?.status || "belum_mengerjakan",
+              submittedAt: submission?.submittedAt || null,
+              updatedAt: submission?.updatedAt || null,
+              feedbackText: submission?.feedbackText || null,
+              teacherId: submission?.teacherId || null,
+              files,
+            };
+          });
+
+        const completed = syntaxStages.filter((stage) => stage.status === "selesai").length;
+
+        return {
+          id: syntax.id,
+          syntaxNo: syntax.syntaxNo,
+          title: syntax.title,
+          subtitle: syntax.title,
+          description: syntax.description,
+          unlocked: !syntax.isLocked,
+          status: completed === syntaxStages.length && syntaxStages.length > 0 ? "selesai" : syntax.isLocked ? "terkunci" : "belum_selesai",
+          progress: {
+            completed,
+            total: syntaxStages.length,
+          },
+          stages: syntaxStages,
+        };
+      });
+
+      const allStages = syntaxes.flatMap((syntax) => syntax.stages);
+      const completedStages = allStages.filter((stage) => stage.status === "selesai").length;
+
+      return {
+        id: group.id,
+        groupName: group.groupName,
+        createdBy: group.createdBy,
+        createdAt: group.createdAt,
+        members: groupMembers,
+        overallProgress: {
+          completed: completedStages,
+          total: allStages.length,
+          percentage: allStages.length === 0 ? 0 : Math.round((completedStages / allStages.length) * 100),
+        },
+        syntaxes,
+      };
+    });
+
+    res.json({
+      project: {
+        id: project.id,
+        title: project.title,
+        description: project.description,
+        status: project.status,
+        classId: project.classId,
+        class: project.class,
+      },
+      groups,
+    });
+  } catch (err) {
+    console.error("GET PROJECT MONITORING ERROR:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put("/api/guru/submissions/:submissionId/status", authenticateToken, authorizeRole(["guru"]), async (req, res) => {
+  try {
+    const { submissionId } = req.params;
+    const { status } = req.body;
+
+    if (!["belum_mengerjakan", "belum_selesai", "selesai"].includes(status)) {
+      return res.status(400).json({ message: "Status tidak valid" });
+    }
+
+    const checkResult = await pool.query(
+      `
+      SELECT
+        pss.id,
+        pst.id AS "stageId",
+        ps.project_id AS "projectId",
+        p.created_by AS "teacherId"
+      FROM project_stage_submissions pss
+      JOIN project_stages pst ON pst.id = pss.stage_id
+      JOIN project_syntaxes ps ON ps.id = pst.syntax_id
+      JOIN projects p ON p.id = ps.project_id
+      WHERE pss.id = $1
+        AND p.created_by = $2
+      `,
+      [submissionId, req.user.id]
+    );
+
+    if (checkResult.rows.length === 0) {
+      return res.status(404).json({ message: "Submission tidak ditemukan atau bukan milik guru ini" });
+    }
+
+    const result = await pool.query(
+      `
+      UPDATE project_stage_submissions
+      SET status = $1,
+          updated_at = NOW()
+      WHERE id = $2
+      RETURNING *
+      `,
+      [status, submissionId]
+    );
+
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error("UPDATE SUBMISSION STATUS ERROR:", err);
     res.status(500).json({ error: err.message });
   }
 });
