@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Plus, Search, Edit, Trash2, Copy, BarChart3, Eye } from "lucide-react";
+import { Plus, Search, Edit, Trash2, Copy, BarChart3, Eye, CheckSquare } from "lucide-react";
 import QuizCreator from "./QuizCreator";
 
 interface Quiz {
@@ -19,9 +19,10 @@ interface Quiz {
 interface TeacherQuizProps {
   onNavigate: (page: string) => void;
   onLogout: () => void;
+  onViewEssayGrading?: (quizId: string, quizTitle: string) => void;
 }
 
-export const TeacherQuiz: React.FC<TeacherQuizProps> = ({ onNavigate, onLogout }) => {
+export const TeacherQuiz: React.FC<TeacherQuizProps> = ({ onNavigate, onLogout, onViewEssayGrading }) => {
   const [searchQuery, setSearchQuery] = useState("");
   const [showCreator, setShowCreator] = useState(false);
   const [selectedQuiz, setSelectedQuiz] = useState<Quiz | null>(null);
@@ -66,6 +67,12 @@ export const TeacherQuiz: React.FC<TeacherQuizProps> = ({ onNavigate, onLogout }
   useEffect(() => {
     fetchQuizzes();
   }, []);
+
+  const handleCheckEssay = (quiz: Quiz) => {
+    if (onViewEssayGrading) {
+      onViewEssayGrading(quiz.id, quiz.title);
+    }
+  };
 
   const filteredQuizzes = quizzes.filter((quiz) => {
     const matchesSearch = quiz.title.toLowerCase().includes(searchQuery.toLowerCase()) || quiz.description.toLowerCase().includes(searchQuery.toLowerCase());
@@ -314,15 +321,25 @@ export const TeacherQuiz: React.FC<TeacherQuizProps> = ({ onNavigate, onLogout }
                           <BarChart3 className="w-5 h-5" />
                         </button>
                       )}
+
+                      {(quiz.questionTypes || []).includes("Essay") && (
+                        <button onClick={() => handleCheckEssay(quiz)} className="p-2 text-purple-600 hover:bg-purple-50 rounded-lg transition-colors" title="Periksa Jawaban Essay">
+                          <CheckSquare className="w-5 h-5" />
+                        </button>
+                      )}
+
                       <button onClick={() => alert("Preview: " + quiz.title)} className="p-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors" title="Preview">
                         <Eye className="w-5 h-5" />
                       </button>
+
                       <button onClick={() => handleDuplicateQuiz(quiz)} className="p-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors" title="Duplikat">
                         <Copy className="w-5 h-5" />
                       </button>
+
                       <button onClick={() => handleEditQuiz(quiz)} className="p-2 text-blue-600 hover:bg-blue-50 rounded-lg transition-colors" title="Edit">
                         <Edit className="w-5 h-5" />
                       </button>
+
                       <button onClick={() => handleDeleteQuiz(quiz.id)} className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors" title="Hapus">
                         <Trash2 className="w-5 h-5" />
                       </button>

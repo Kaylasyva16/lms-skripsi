@@ -668,11 +668,11 @@ export function QuizPage() {
   const [currentQuestion, setCurrentQuestion] = useState(0);
   const [answers, setAnswers] = useState<Record<number, any>>({});
   const [timeLeft, setTimeLeft] = useState(0);
-  const [quizResult, setQuizResult] = useState<{ score: number; correct: number; total: number; totalPoints: number; earnedPoints: number } | null>(null);
-  const [showSuccess, setShowSuccess] = useState(false);
+  const [quizResult, setQuizResult] = useState<{ score: number; correct: number; total: number; totalPoints: number; earnedPoints: number; hasEssay: boolean } | null>(null);
   const [quizQuestions, setQuizQuestions] = useState<Question[]>([]);
 
   const [loading, setLoading] = useState(true);
+  const [showSuccess, setShowSuccess] = useState(false);
   useEffect(() => {
     if (showSuccess) {
       const timer = setTimeout(() => {
@@ -683,6 +683,16 @@ export function QuizPage() {
     }
   }, [showSuccess]);
 
+  const isSubmittedEssayQuiz = (quiz: any) => {
+    return !!quiz.submissionId || quiz.submissionStatus === "submitted" || quiz.submissionStatus === "graded";
+  };
+
+  const getQuizButtonLabel = (quiz: any) => {
+    if (quiz.submissionStatus === "graded") return "Lihat Nilai";
+    if (quiz.submissionStatus === "submitted" || quiz.submissionId) return "Menunggu Penilaian";
+    return "Mulai Kuis";
+  };
+
   const handleStartQuiz = async (quiz: any) => {
     if (!isQuizAllowed(quiz.type as QuestionType)) {
       toast.error("Kuis ini tidak tersedia untuk siswa.");
@@ -692,6 +702,36 @@ export function QuizPage() {
     try {
       const token = localStorage.getItem("token");
 
+      const detailRes = await fetch(`http://localhost:5000/api/student/quizzes/${quiz.id}`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      if (!detailRes.ok) {
+        throw new Error("Gagal mengambil status quiz");
+      }
+
+      const latestQuiz = await detailRes.json();
+
+      // jika sudah submit → langsung result
+      if (latestQuiz.submissionStatus === "submitted" || latestQuiz.submissionStatus === "graded" || latestQuiz.submissionId) {
+        setSelectedQuiz(latestQuiz);
+
+        setQuizResult({
+          score: latestQuiz.totalScore ?? 0,
+          correct: 0,
+          total: latestQuiz.totalQuestions ?? 0,
+          totalPoints: latestQuiz.totalPoints ?? 0,
+          earnedPoints: 0,
+          hasEssay: true,
+        });
+
+        setViewMode("result");
+        return;
+      }
+
+      // ambil soal jika belum submit
       const res = await fetch(`http://localhost:5000/api/student/quizzes/${quiz.id}/questions`, {
         headers: {
           Authorization: `Bearer ${token}`,
@@ -699,8 +739,6 @@ export function QuizPage() {
       });
 
       if (!res.ok) {
-        const text = await res.text();
-        console.error("Quiz detail error:", text);
         throw new Error("Gagal mengambil detail kuis");
       }
 
@@ -708,32 +746,17 @@ export function QuizPage() {
 
       const filteredQuestions = data
         .filter((q: any) => q.type === "multiple-choice" || q.type === "essay")
-        .map((q: any) => {
-          if (q.type === "multiple-choice") {
-            return {
-              id: q.id,
-              type: "multiple-choice" as const,
-              question: q.questionText,
-              points: q.points ?? 10,
-              difficulty: q.payload?.difficulty ?? "Sedang",
-              options: q.options?.map((opt: any) => opt.optionText) || [],
-              correctAnswer: q.options?.findIndex((opt: any) => opt.isCorrect) ?? 0,
-            };
-          }
+        .map((q: any) => ({
+          id: q.id,
+          type: q.type,
+          question: q.questionText,
+          points: q.points ?? 10,
+          difficulty: q.payload?.difficulty ?? "Sedang",
+          options: q.options?.map((opt: any) => opt.optionText) || [],
+          correctAnswer: q.options?.findIndex((opt: any) => opt.isCorrect) ?? 0,
+        }));
 
-          return {
-            id: q.id,
-            type: "essay" as const,
-            question: q.questionText,
-            points: q.points ?? 10,
-            difficulty: q.payload?.difficulty ?? "Sedang",
-            minWords: q.payload?.minWords ?? 30,
-            keywords: q.payload?.keywords ?? [],
-            sampleAnswer: q.explanation ?? "",
-          };
-        });
-
-      setSelectedQuiz(quiz);
+      setSelectedQuiz(latestQuiz);
       setQuizQuestions(filteredQuestions);
       setViewMode("detail");
     } catch (error) {
@@ -778,6 +801,10 @@ export function QuizPage() {
           icon: item.icon ?? "📝",
           score: item.score ?? null,
           totalPoints: item.totalPoints ?? 0,
+          submissionId: item.submissionId ?? null,
+          submissionStatus: item.submissionStatus ?? "not_started",
+          submittedAt: item.submittedAt ?? null,
+          totalScore: item.totalScore ?? null,
         }));
 
         setQuizzes(mapped);
@@ -961,11 +988,10 @@ export function QuizPage() {
     }
   };
 
-  const handleSubmitQuiz = () => {
+  const handleSubmitQuiz = async () => {
     if (!selectedQuiz) return;
 
     const questions = quizQuestions;
-
     const currentQ = questions[currentQuestion];
 
     if (currentQ.type === "drag-drop") {
@@ -976,6 +1002,83 @@ export function QuizPage() {
       handleAnswerChange(currentQ.id, [...logicAnswers]);
     } else if (currentQ.type === "simulation") {
       handleAnswerChange(currentQ.id, [...simulationSteps]);
+    }
+
+    const hasEssay = questions.some((q) => q.type === "essay");
+
+    if (hasEssay) {
+      try {
+        const token = localStorage.getItem("token");
+        const essayAnswers = questions
+          .filter((q) => q.type === "essay" && answers[q.id]?.trim())
+          .map((q) => ({
+            questionId: q.id,
+            answerText: answers[q.id].trim(),
+          }));
+
+        if (essayAnswers.length === 0) {
+          toast.error("Jawaban essay belum diisi");
+          return;
+        }
+
+        const res = await fetch(`http://localhost:5000/api/student/quizzes/${selectedQuiz.id}/submit`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            answers: essayAnswers,
+          }),
+        });
+
+        const data = await res.json();
+
+        if (!res.ok) {
+          throw new Error(data.message || "Gagal mengumpulkan quiz");
+        }
+
+        setQuizzes((prev) =>
+          prev.map((q) =>
+            q.id === selectedQuiz.id
+              ? {
+                  ...q,
+                  submissionId: data.submission?.id ?? true,
+                  submissionStatus: "submitted",
+                  submittedAt: data.submission?.submittedAt || new Date().toISOString(),
+                  totalScore: null,
+                }
+              : q
+          )
+        );
+
+        setSelectedQuiz((prev: any) =>
+          prev
+            ? {
+                ...prev,
+                submissionStatus: "submitted",
+                submittedAt: data.submission?.submittedAt || new Date().toISOString(),
+                totalScore: null,
+              }
+            : prev
+        );
+
+        setQuizResult({
+          score: 0,
+          correct: 0,
+          total: questions.length,
+          totalPoints: 0,
+          earnedPoints: 0,
+          hasEssay: true,
+        });
+
+        setShowSuccess(true);
+        setViewMode("result");
+        return;
+      } catch (error: any) {
+        toast.error(error.message || "Gagal mengumpulkan quiz");
+        return;
+      }
     }
 
     let correct = 0;
@@ -1025,40 +1128,22 @@ export function QuizPage() {
           correct++;
           earnedPoints += q.points;
         }
-      } else if (q.type === "essay") {
-        const userAnswer = answers[q.id] || "";
-        if (userAnswer && q.keywords) {
-          const answerLower = userAnswer.toLowerCase();
-          const keywordMatches = q.keywords.filter((keyword) => answerLower.includes(keyword.toLowerCase())).length;
-
-          const keywordScore = (keywordMatches / q.keywords.length) * q.points;
-
-          const wordCount = userAnswer
-            .trim()
-            .split(/\s+/)
-            .filter((w) => w.length > 0).length;
-          const wordScore = q.minWords && wordCount >= q.minWords ? 1 : 0.5;
-
-          const finalScore = keywordScore * wordScore;
-          earnedPoints += Math.round(finalScore);
-
-          if (keywordMatches >= q.keywords.length * 0.6 && wordCount >= (q.minWords || 30)) {
-            correct++;
-          }
-        }
       }
     });
 
-    const score = Math.round((earnedPoints / totalPoints) * 100);
+    const score = totalPoints > 0 ? Math.round((earnedPoints / totalPoints) * 100) : 0;
+
     setQuizResult({
       score,
       correct,
       total: questions.length,
       totalPoints,
       earnedPoints,
+      hasEssay: false,
     });
+
     setViewMode("result");
-    setShowSuccess(true);
+    toast.success("Kuis berhasil diselesaikan!");
   };
 
   const formatTime = (seconds: number) => {
@@ -1081,136 +1166,147 @@ export function QuizPage() {
   };
 
   // LIST VIEW
+  const successToast = showSuccess ? (
+    <div className="fixed top-6 right-6 z-[9999] max-w-md rounded-xl bg-green-500 px-5 py-3 text-white shadow-lg">
+      <div className="flex items-center gap-3">
+        <span className="flex h-7 w-7 items-center justify-center rounded-full bg-white/20 font-bold">✓</span>
+        <p className="font-medium">Kuis berhasil dikumpulkan! Menunggu penilaian guru.</p>
+      </div>
+    </div>
+  ) : null;
+
   if (viewMode === "list") {
     return (
-      <div className="space-y-6">
-        <div>
-          <h2 className="text-gray-900 mb-2">Kuis Gamifikasi 🎮</h2>
-          <p className="text-gray-600">6 tipe kuis interaktif dengan level kesulitan bertingkat</p>
-        </div>
+      <>
+        {successToast}
 
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-          <Card className="bg-gradient-to-br from-blue-500 to-blue-600 text-white">
-            <CardContent className="pt-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-blue-100 text-sm mb-1">Total Kuis</p>
-                  <p className="text-2xl font-bold">{quizzes.length}</p>
+        <div className="space-y-8 px-3 md:px-5 py-3">
+          <div>
+            <h2 className="text-gray-900 mb-2">Kuis Gamifikasi 🎮</h2>
+            <p className="text-gray-600">6 tipe kuis interaktif dengan level kesulitan bertingkat</p>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-6">
+            <Card className="bg-gradient-to-br from-blue-500 to-blue-600 text-white rounded-2xl">
+              <CardContent className="pt-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-blue-100 text-sm mb-1">Total Kuis</p>
+                    <p className="text-2xl font-bold">{quizzes.length}</p>
+                  </div>
+                  <BookOpen className="w-10 h-10 text-blue-200" />
                 </div>
-                <BookOpen className="w-10 h-10 text-blue-200" />
-              </div>
-            </CardContent>
-          </Card>
+              </CardContent>
+            </Card>
 
-          <Card className="bg-gradient-to-br from-green-500 to-green-600 text-white">
-            <CardContent className="pt-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-green-100 text-sm mb-1">Tipe Soal</p>
-                  <p className="text-2xl font-bold">6</p>
+            <Card className="bg-gradient-to-br from-green-500 to-green-600 text-white rounded-2xl">
+              <CardContent className="pt-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-green-100 text-sm mb-1">Tipe Soal</p>
+                    <p className="text-2xl font-bold">6</p>
+                  </div>
+                  <Sparkles className="w-10 h-10 text-green-200" />
                 </div>
-                <Sparkles className="w-10 h-10 text-green-200" />
-              </div>
-            </CardContent>
-          </Card>
+              </CardContent>
+            </Card>
 
-          <Card className="bg-gradient-to-br from-orange-500 to-orange-600 text-white">
-            <CardContent className="pt-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-orange-100 text-sm mb-1">Level Soal</p>
-                  <p className="text-2xl font-bold">3</p>
+            <Card className="bg-gradient-to-br from-orange-500 to-orange-600 text-white rounded-2xl">
+              <CardContent className="pt-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-orange-100 text-sm mb-1">Level Soal</p>
+                    <p className="text-2xl font-bold">3</p>
+                  </div>
+                  <Flame className="w-10 h-10 text-orange-200" />
                 </div>
-                <Flame className="w-10 h-10 text-orange-200" />
-              </div>
-            </CardContent>
-          </Card>
+              </CardContent>
+            </Card>
 
-          <Card className="bg-gradient-to-br from-purple-500 to-purple-600 text-white">
-            <CardContent className="pt-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-purple-100 text-sm mb-1">Total Poin</p>
-                  <p className="text-2xl font-bold">0</p>
+            <Card className="bg-gradient-to-br from-purple-500 to-purple-600 text-white rounded-2xl">
+              <CardContent className="pt-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-purple-100 text-sm mb-1">Total Poin</p>
+                    <p className="text-2xl font-bold">0</p>
+                  </div>
+                  <Trophy className="w-10 h-10 text-purple-200" />
                 </div>
-                <Trophy className="w-10 h-10 text-purple-200" />
-              </div>
-            </CardContent>
-          </Card>
-        </div>
+              </CardContent>
+            </Card>
+          </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {[...quizzes]
-            .sort((a, b) => {
-              const aAllowed = isQuizAllowed(a);
-              const bAllowed = isQuizAllowed(b);
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-8">
+            {[...quizzes]
+              .sort((a, b) => {
+                const aAllowed = isQuizAllowed(a);
+                const bAllowed = isQuizAllowed(b);
 
-              // yang allowed tampil dulu
-              if (aAllowed && !bAllowed) return -1;
-              if (!aAllowed && bAllowed) return 1;
+                if (aAllowed && !bAllowed) return -1;
+                if (!aAllowed && bAllowed) return 1;
+                return 0;
+              })
+              .map((quiz) => {
+                const disabled = !isQuizAllowed(quiz);
 
-              return 0;
-            })
-            .map((quiz) => {
-              const disabled = !isQuizAllowed(quiz);
+                return (
+                  <Card key={quiz.id} className={`relative h-full rounded-2xl border-2 transition-all ${disabled ? "opacity-50 border-gray-200" : "border-gray-200 hover:border-blue-300 hover:shadow-lg"}`}>
+                    {disabled && <Badge className="absolute top-3 right-3 bg-red-500 text-white">🔒 Terkunci</Badge>}
 
-              return (
-                <Card key={quiz.id} className={`relative transition-shadow border-2 ${disabled ? "opacity-50 border-gray-200" : "hover:shadow-lg border-gray-200 hover:border-blue-300"}`}>
-                  {disabled && <Badge className="absolute top-3 right-3 bg-red-500 text-white">🔒 Terkunci</Badge>}
-
-                  <CardHeader>
-                    <div className="flex items-start justify-between mb-3">
-                      <div className="text-4xl mb-2">{quiz.icon}</div>
-                      <Badge className={getLevelColor(quiz.level)}>{quiz.level}</Badge>
-                    </div>
-                    <CardTitle className="text-lg mb-2">{quiz.title}</CardTitle>
-                  </CardHeader>
-
-                  <CardContent className="space-y-4">
-                    <p className="text-sm text-gray-600">{quiz.description}</p>
-
-                    <div className="grid grid-cols-2 gap-3">
-                      <div className="flex items-center gap-2 text-sm text-gray-600">
-                        <BookOpen className="w-4 h-4 text-blue-500" />
-                        <span>{quiz.totalQuestions} Soal</span>
+                    <CardHeader className="pb-3">
+                      <div className="flex items-start justify-between mb-3">
+                        <div className="text-4xl mb-2">{quiz.icon}</div>
+                        <Badge className={getLevelColor(quiz.level)}>{quiz.level}</Badge>
                       </div>
-                      <div className="flex items-center gap-2 text-sm text-gray-600">
-                        <Clock className="w-4 h-4 text-orange-500" />
-                        <span>{quiz.duration} Menit</span>
-                      </div>
-                    </div>
+                      <CardTitle className="text-lg leading-snug">{quiz.title}</CardTitle>
+                    </CardHeader>
 
-                    <div className="bg-gradient-to-r from-blue-50 to-purple-50 rounded-lg p-3 border border-blue-200">
-                      <p className="text-xs text-gray-600 mb-2">Level Kesulitan:</p>
-                      <div className="flex gap-1 flex-wrap">
-                        <Badge variant="outline" className="text-xs bg-green-50 border-green-300">
-                          ⭐ Mudah
-                        </Badge>
-                        <Badge variant="outline" className="text-xs bg-orange-50 border-orange-300">
-                          ⭐⭐ Sedang
-                        </Badge>
-                        <Badge variant="outline" className="text-xs bg-red-50 border-red-300">
-                          ⭐⭐⭐ Sulit
-                        </Badge>
-                      </div>
-                    </div>
+                    <CardContent className="space-y-5 pt-0">
+                      <p className="text-sm leading-7 text-gray-600">{quiz.description}</p>
 
-                    <Button
-                      disabled={disabled}
-                      className={`w-full gap-2 ${disabled ? "bg-gray-300 cursor-not-allowed" : "bg-gradient-to-r from-blue-500 to-purple-500 hover:from-blue-600 hover:to-purple-600"}`}
-                      onClick={() => {
-                        if (!disabled) handleStartQuiz(quiz);
-                      }}
-                    >
-                      <Play className="w-4 h-4" />
-                      {disabled ? "Tidak Tersedia" : "Mulai Kuis"}
-                    </Button>
-                  </CardContent>
-                </Card>
-              );
-            })}
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="flex items-center gap-2 text-sm text-gray-600">
+                          <BookOpen className="w-4 h-4 text-blue-500" />
+                          <span>{quiz.totalQuestions} Soal</span>
+                        </div>
+                        <div className="flex items-center gap-2 text-sm text-gray-600">
+                          <Clock className="w-4 h-4 text-orange-500" />
+                          <span>{quiz.duration} Menit</span>
+                        </div>
+                      </div>
+
+                      <div className="rounded-xl border border-blue-200 bg-gradient-to-r from-blue-50 to-purple-50 p-4">
+                        <p className="text-xs text-gray-600 mb-3">Level Kesulitan:</p>
+                        <div className="flex flex-wrap gap-2">
+                          <Badge variant="outline" className="text-xs bg-green-50 border-green-300">
+                            ⭐ Mudah
+                          </Badge>
+                          <Badge variant="outline" className="text-xs bg-orange-50 border-orange-300">
+                            ⭐⭐ Sedang
+                          </Badge>
+                          <Badge variant="outline" className="text-xs bg-red-50 border-red-300">
+                            ⭐⭐⭐ Sulit
+                          </Badge>
+                        </div>
+                      </div>
+
+                      <Button
+                        disabled={disabled}
+                        className={`w-full gap-2 h-12 ${disabled ? "bg-gray-300 cursor-not-allowed" : "bg-gradient-to-r from-blue-500 to-purple-500 hover:from-blue-600 hover:to-purple-600"}`}
+                        onClick={() => {
+                          if (!disabled) handleStartQuiz(quiz);
+                        }}
+                      >
+                        <Play className="w-4 h-4" />
+                        {disabled ? "Tidak Tersedia" : getQuizButtonLabel(quiz)}
+                      </Button>
+                    </CardContent>
+                  </Card>
+                );
+              })}
+          </div>
         </div>
-      </div>
+      </>
     );
   }
 
@@ -1327,10 +1423,30 @@ export function QuizPage() {
               </CardContent>
             </Card>
 
-            <Button className="w-full bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 gap-2 h-12" onClick={handleBeginQuiz}>
-              <Play className="w-5 h-5" />
-              Mulai Mengerjakan
-            </Button>
+            {isSubmittedEssayQuiz(selectedQuiz) ? (
+              <Button
+                className="w-full bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700 gap-2 h-12"
+                onClick={() => {
+                  setQuizResult({
+                    score: 0,
+                    correct: 0,
+                    total: selectedQuiz.totalQuestions ?? 0,
+                    totalPoints: selectedQuiz.totalPoints ?? 0,
+                    earnedPoints: 0,
+                    hasEssay: true,
+                  });
+                  setViewMode("result");
+                }}
+              >
+                <Clock className="w-5 h-5" />
+                Lihat Status Kuis
+              </Button>
+            ) : (
+              <Button className="w-full bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 gap-2 h-12" onClick={handleBeginQuiz}>
+                <Play className="w-5 h-5" />
+                Mulai Mengerjakan
+              </Button>
+            )}
           </div>
         </div>
       </div>
@@ -1459,17 +1575,112 @@ export function QuizPage() {
   }
 
   // RESULT VIEW
+
   if (viewMode === "result" && quizResult && selectedQuiz) {
+    // If quiz has essay questions, show pending grading message
+    if (quizResult.hasEssay) {
+      return (
+        <>
+          {successToast}
+          <div className="space-y-6">
+            <Card className="bg-gradient-to-br from-blue-500 to-indigo-600 text-white">
+              <CardContent className="pt-8 pb-8 text-center">
+                <div className="mb-4">
+                  <Clock className="w-20 h-20 mx-auto text-white animate-pulse" />
+                </div>
+                <h2 className="text-white mb-2">Status Penilaian</h2>
+                <p className="text-sm mb-6 opacity-90">Jawaban essay Anda sudah berhasil dikumpulkan.</p>
+
+                <div className="bg-white/20 backdrop-blur-sm rounded-lg p-6 mb-6">
+                  <p className="text-sm opacity-90 mb-2">Status</p>
+                  <p className="text-3xl font-bold mb-2">Menunggu Penilaian Guru</p>
+                  <p className="text-sm opacity-90">{quizResult.total} soal telah dikerjakan</p>
+                </div>
+
+                <div className="bg-white/10 backdrop-blur-sm rounded-lg p-4 mb-6 border border-white/20">
+                  <p className="text-sm opacity-90 mb-2">Informasi</p>
+                  <p className="text-sm opacity-80">Nilai akan muncul setelah guru selesai memeriksa jawaban essay Anda.</p>
+                </div>
+
+                <Badge className="bg-white/20 text-white hover:bg-white/30 px-6 py-2 text-base border border-white/30">
+                  Dikumpulkan:{" "}
+                  {selectedQuiz?.submittedAt
+                    ? new Date(selectedQuiz.submittedAt).toLocaleString("id-ID", {
+                        day: "numeric",
+                        month: "long",
+                        year: "numeric",
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      })
+                    : "-"}
+                </Badge>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Timer className="w-5 h-5 text-blue-600" />
+                  Proses Selanjutnya
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <div className="flex items-start gap-3">
+                  <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center flex-shrink-0">
+                    <span className="text-sm font-bold text-blue-600">1</span>
+                  </div>
+                  <div>
+                    <p className="font-medium text-gray-900">Jawaban Tersimpan</p>
+                    <p className="text-sm text-gray-600">Semua jawaban Anda telah tersimpan dengan aman</p>
+                  </div>
+                </div>
+
+                <div className="flex items-start gap-3">
+                  <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center flex-shrink-0">
+                    <span className="text-sm font-bold text-blue-600">2</span>
+                  </div>
+                  <div>
+                    <p className="font-medium text-gray-900">Penilaian Guru</p>
+                    <p className="text-sm text-gray-600">Guru akan menilai jawaban essay Anda</p>
+                  </div>
+                </div>
+
+                <div className="flex items-start gap-3">
+                  <div className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center flex-shrink-0">
+                    <span className="text-sm font-bold text-gray-400">3</span>
+                  </div>
+                  <div>
+                    <p className="font-medium text-gray-400">Nilai Keluar</p>
+                    <p className="text-sm text-gray-400">Cek halaman Nilai untuk melihat hasil</p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            <Button
+              variant="outline"
+              className="w-full px-6 py-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors"
+              onClick={() => {
+                setViewMode("list");
+                setSelectedQuiz(null);
+              }}
+            >
+              Kembali ke Daftar Kuis
+            </Button>
+          </div>
+        </>
+      );
+    }
+
+    // Normal result view for auto-graded quizzes
     const isPassed = quizResult.score >= 70;
 
     return (
       <>
         {showSuccess && (
-          <div className="fixed top-5 right-5 z-[9999]">
-            <div className="flex items-center gap-3 bg-green-600 text-white px-5 py-3 rounded-xl shadow-2xl border border-green-700">
-              <span className="text-lg">✅</span>
-              <span className="font-semibold">Kuis berhasil diselesaikan!</span>
-            </div>
+          <div className="fixed top-6 right-6 z-50 flex items-center gap-3 bg-green-500 text-white px-5 py-3 rounded-xl shadow-lg animate-in fade-in slide-in-from-top-2 duration-300">
+            <span className="flex h-6 w-6 items-center justify-center rounded-full bg-white/20">✓</span>
+            <span className="font-medium">Kuis berhasil dikumpulkan! Menunggu penilaian guru.</span>
           </div>
         )}
         <div className="space-y-6">

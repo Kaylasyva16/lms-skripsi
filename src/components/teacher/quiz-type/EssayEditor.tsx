@@ -17,7 +17,7 @@ export interface EssayQuestionData {
   level: "mudah" | "sedang" | "sulit";
   minWords?: number;
   maxWords?: number;
-  rubric: string[]; // ⬅️ WAJIB
+  rubric: string[];
   guideline: string;
 }
 
@@ -106,21 +106,6 @@ export function EssayEditor({ data, onChange }: EssayEditorProps) {
             <Textarea value={localData.guideline} onChange={(e) => update({ guideline: e.target.value })} rows={3} placeholder="Pedoman umum penilaian jawaban essay..." />
           </div>
 
-          {/* Level */}
-          <div className="space-y-2">
-            <Label>Tingkat Kesulitan</Label>
-            <Select value={localData.level} onValueChange={(v: "mudah" | "sedang" | "sulit") => update({ level: v })}>
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="mudah">⭐ Mudah</SelectItem>
-                <SelectItem value="sedang">⭐⭐ Sedang</SelectItem>
-                <SelectItem value="sulit">⭐⭐⭐ Sulit</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-
           {/* Word Limit */}
           <div className="grid grid-cols-2 gap-4">
             <div>
@@ -176,7 +161,6 @@ export function EssayEditor({ data, onChange }: EssayEditorProps) {
         <CardContent className="space-y-4">
           <div className="flex justify-between items-center">
             <Badge variant="outline">✍️ Essay</Badge>
-            {levelBadge()}
           </div>
 
           <h4 className="font-medium">{localData.question || "Pertanyaan akan muncul di sini"}</h4>

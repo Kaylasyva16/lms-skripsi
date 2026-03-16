@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../ui/card";
 import { Button } from "../ui/button";
 import { Badge } from "../ui/badge";
@@ -27,67 +27,88 @@ export default function TeacherProjects({ onNavigate }: TeacherProjectsProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [filterStatus, setFilterStatus] = useState<"all" | "active" | "completed">("all");
 
-  const projects = [
-    {
-      id: 1,
-      title: "Sistem Kasir Minimarket",
-      class: "XI RPL 1",
-      points: 500,
-      deadline: "15 Nov 2025",
-      type: "group",
-      status: "active",
-      description: "Membuat aplikasi kasir berbasis desktop dengan Java Swing. Aplikasi harus memiliki fitur manajemen produk, transaksi penjualan, dan laporan.",
-      groups: [
-        {
-          id: 1,
-          name: "Kelompok Alpha",
-          members: [
-            { name: "Ahmad Syarif", avatar: "AS", role: "Project Leader" },
-            { name: "Budi Santoso", avatar: "BS", role: "Database Designer" },
-            { name: "Citra Dewi", avatar: "CD", role: "UI/UX Designer" },
-          ],
-          submitted: false,
-          graded: false,
-          score: null,
-          progress: [
-            { sintaksId: 1, completed: false, completedDate: null },
-            { sintaksId: 2, completed: false, completedDate: null },
-            { sintaksId: 3, completed: false, completedDate: null },
-            { sintaksId: 4, completed: false, completedDate: null },
-            { sintaksId: 5, completed: false, completedDate: null },
-          ],
+  const [projects, setProjects] = useState<any[]>([]);
+  const [classes, setClasses] = useState<{ id: string; name: string }[]>([]);
+  const [selectedClassId, setSelectedClassId] = useState("");
+
+  const [title, setTitle] = useState("");
+  const [deadline, setDeadline] = useState("");
+  const [description, setDescription] = useState("");
+  const [membersPerGroup, setMembersPerGroup] = useState(3);
+
+  useEffect(() => {
+    const fetchClasses = async () => {
+      try {
+        const token = localStorage.getItem("token");
+
+        const res = await fetch("http://localhost:5000/kelas", {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        });
+
+        const data = await res.json();
+
+        const formatted = data.map((item: any) => ({
+          id: String(item.id),
+          name: item.nama,
+        }));
+
+        setClasses(formatted);
+      } catch (error) {
+        console.error(error);
+      }
+    };
+
+    fetchClasses();
+  }, []);
+
+  useEffect(() => {
+    const fetchProjects = async () => {
+      try {
+        const token = localStorage.getItem("token");
+
+        const res = await fetch("http://localhost:5000/api/projects", {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        });
+
+        const data = await res.json();
+        console.log("PROJECTS RESPONSE:", data);
+
+        if (!res.ok) {
+          console.error("Gagal ambil projects:", data.error || data.message || data);
+          setProjects([]);
+          return;
+        }
+
+        setProjects(Array.isArray(data) ? data : []);
+      } catch (error) {
+        console.error("Fetch projects error:", error);
+        setProjects([]);
+      }
+    };
+
+    fetchProjects();
+  }, []);
+
+  useEffect(() => {
+    const checkMe = async () => {
+      const token = localStorage.getItem("token");
+
+      const res = await fetch("http://localhost:5000/me", {
+        headers: {
+          Authorization: `Bearer ${token}`,
         },
-      ],
-    },
-    {
-      id: 2,
-      title: "Website Portfolio Personal",
-      class: "X RPL 1",
-      points: 300,
-      deadline: "20 Nov 2025",
-      type: "individual",
-      status: "active",
-      description: "Membuat website portfolio personal menggunakan HTML, CSS, dan JavaScript. Website harus responsive dan menampilkan informasi pribadi, skill, dan proyek.",
-      students: [
-        {
-          id: 1,
-          name: "Joko Susilo",
-          nis: "2024001",
-          avatar: "JS",
-          submitted: true,
-          graded: true,
-          score: 85,
-          progress: [
-            { sintaksId: 1, completed: true, completedDate: "1 Nov 2025" },
-            { sintaksId: 2, completed: true, completedDate: "3 Nov 2025" },
-            { sintaksId: 3, completed: true, completedDate: "5 Nov 2025" },
-            { sintaksId: 4, completed: true, completedDate: "10 Nov 2025" },
-            { sintaksId: 5, completed: true, completedDate: "20 Nov 2025" },
-          ],
-        },
-      ],
-    },
-  ];
+      });
+
+      const data = await res.json();
+      console.log("ME:", data);
+    };
+
+    checkMe();
+  }, []);
 
   const handleViewProgress = (group: any, project: any) => {
     setSelectedGroupForProgress({
@@ -98,45 +119,86 @@ export default function TeacherProjects({ onNavigate }: TeacherProjectsProps) {
     setShowProgressDetail(true);
   };
 
-  const filteredProjects = projects.filter((project) => {
-    const matchesSearch = project.title.toLowerCase().includes(searchQuery.toLowerCase()) || project.class.toLowerCase().includes(searchQuery.toLowerCase());
-    const matchesFilter = filterStatus === "all" || project.status === filterStatus;
-    return matchesSearch && matchesFilter;
-  });
+  const handleCreateProject = async (e: React.FormEvent) => {
+    e.preventDefault();
 
-  const calculateProjectProgress = (project: any) => {
-    if (project.type === "group") {
-      const totalGroups = project.groups?.length || 0;
-      if (totalGroups === 0) return 0;
-
-      const totalProgress = project.groups.reduce((sum: number, group: any) => {
-        const completedSteps = group.progress?.filter((p: any) => p.completed).length || 0;
-        return sum + (completedSteps / 5) * 100;
-      }, 0);
-
-      return Math.round(totalProgress / totalGroups);
+    if (!title || !selectedClassId || !deadline) {
+      alert("Judul, kelas, dan deadline wajib diisi");
+      return;
     }
 
-    const totalStudents = project.students?.length || 0;
-    if (totalStudents === 0) return 0;
+    try {
+      const token = localStorage.getItem("token");
 
-    const totalProgress = project.students.reduce((sum: number, student: any) => {
-      const completedSteps = student.progress?.filter((p: any) => p.completed).length || 0;
-      return sum + (completedSteps / 5) * 100;
-    }, 0);
+      const payload = {
+        title,
+        classId: Number(selectedClassId),
+        type: projectType,
+        deadline,
+        description,
+        membersPerGroup: projectType === "group" ? Number(membersPerGroup) : null,
+      };
 
-    return Math.round(totalProgress / totalStudents);
+      const res = await fetch("http://localhost:5000/api/projects", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(payload),
+      });
+
+      if (!res.ok) throw new Error("Gagal membuat proyek");
+
+      const newProject = await res.json();
+      setProjects((prev) => [newProject, ...prev]);
+
+      setTitle("");
+      setSelectedClassId("");
+      setDeadline("");
+      setDescription("");
+      setMembersPerGroup(3);
+      setProjectType("group");
+      setShowCreateForm(false);
+    } catch (error) {
+      console.error(error);
+    }
   };
 
-  // ✅ Progress detail page
+  const filteredProjects = Array.isArray(projects)
+    ? projects.filter((project) => {
+        const matchesSearch = project.title?.toLowerCase().includes(searchQuery.toLowerCase()) || project.class?.toLowerCase().includes(searchQuery.toLowerCase());
+
+        const matchesFilter = filterStatus === "all" || project.status === filterStatus;
+
+        return matchesSearch && matchesFilter;
+      })
+    : [];
+
+  const calculateProjectProgress = (project: any) => {
+    return 0;
+  };
+
   if (showProgressDetail && selectedGroupForProgress) {
     return <ProjectProgressDetail onBack={() => setShowProgressDetail(false)} groupData={selectedGroupForProgress} projectTitle={selectedGroupForProgress.projectTitle} />;
   }
 
-  // ✅ Project detail page
   if (selectedProjectDetail) {
     return <TeacherProjectDetail project={selectedProjectDetail} onBack={() => setSelectedProjectDetail(null)} onNavigate={onNavigate} onViewProgress={handleViewProgress} />;
   }
+
+  const formatDate = (dateString: string) => {
+    if (!dateString) return "-";
+
+    const date = new Date(dateString);
+
+    return date.toLocaleDateString("id-ID", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+    });
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-blue-50">
       <div className="p-8">
@@ -231,88 +293,84 @@ export default function TeacherProjects({ onNavigate }: TeacherProjectsProps) {
               <CardTitle className="text-blue-900">Tambah Proyek Baru</CardTitle>
               <CardDescription>Buat proyek pembelajaran berbasis praktik untuk siswa</CardDescription>
             </CardHeader>
-            <CardContent className="pt- pb-10 px-8">
-              <form className="space-y-3">
-                <div className="text-gray-800 font-medium">
-                  <Label>Tipe Proyek</Label>
+            <CardContent className="pt-6 pb-10 px-8">
+              <form className="space-y-6" onSubmit={handleCreateProject}>
+                <div className="space-y-3">
+                  <Label className="text-gray-800 font-medium">Tipe Proyek</Label>
 
                   <RadioGroup value={projectType} onValueChange={(value) => setProjectType(value as any)}>
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                       <label
                         htmlFor="individual"
-                        className={`flex items-center space-x-3 p-4 border-2 rounded-lg cursor-pointer transition-all ${projectType === "individual" ? "border-blue-500 bg-blue-50" : "border-gray-200 hover:border-blue-300"}`}
+                        className={`flex items-center space-x-3 p-6 border-2 rounded-xl cursor-pointer transition-all ${projectType === "individual" ? "border-blue-500 bg-blue-50" : "border-gray-200 hover:border-blue-300"}`}
                       >
                         <RadioGroupItem value="individual" id="individual" />
-                        <div className="flex items-center gap-2">
-                          <User className="w-5 h-5 text-orange-500" />
-                          <span>Tugas Individu</span>
+                        <div className="flex items-center gap-3">
+                          <User className="w-6 h-6 text-orange-500" />
+                          <span className="text-lg font-medium">Tugas Individu</span>
                         </div>
                       </label>
 
                       <label
                         htmlFor="group"
-                        className={`flex items-center space-x-3 p-4 border-2 rounded-lg cursor-pointer transition-all ${projectType === "group" ? "border-blue-500 bg-blue-50" : "border-gray-200 hover:border-blue-300"}`}
+                        className={`flex items-center space-x-3 p-6 border-2 rounded-xl cursor-pointer transition-all ${projectType === "group" ? "border-blue-500 bg-blue-50" : "border-gray-200 hover:border-blue-300"}`}
                       >
                         <RadioGroupItem value="group" id="group" />
-                        <div className="flex items-center gap-2">
-                          <Users className="w-5 h-5 text-purple-500" />
-                          <span>Tugas Kelompok</span>
+                        <div className="flex items-center gap-3">
+                          <Users className="w-6 h-6 text-purple-500" />
+                          <span className="text-lg font-medium">Tugas Kelompok</span>
                         </div>
                       </label>
                     </div>
                   </RadioGroup>
                 </div>
 
-                <div className="space-y-4">
-                  <div>
-                    <Label>Judul Proyek</Label>
-                    <Input placeholder="Masukkan judul proyek" />
-                  </div>
-
-                  <div className="grid grid-cols-3 gap-4">
-                    <div>
-                      <Label>Kelas</Label>
-                      <Select>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Pilih kelas" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="x-rpl-1">X RPL 1</SelectItem>
-                          <SelectItem value="xi-rpl-1">XI RPL 1</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-
-                    <div>
-                      <Label>Poin XP</Label>
-                      <Input type="number" defaultValue={500} />
-                    </div>
-
-                    <div>
-                      <Label>Deadline</Label>
-                      <Input type="date" />
-                    </div>
-                  </div>
-
-                  <div>
-                    <Label>Deskripsi Proyek</Label>
-                    <Textarea placeholder="Jelaskan tentang proyek ini secara detail..." />
-                  </div>
-
-                  {projectType === "group" && (
-                    <div>
-                      <Label>Jumlah Anggota per Kelompok</Label>
-                      <Input type="number" defaultValue={3} min={2} />
-                    </div>
-                  )}
+                <div className="space-y-2">
+                  <Label>Judul Proyek</Label>
+                  <Input placeholder="Masukkan judul proyek" value={title} onChange={(e) => setTitle(e.target.value)} className="h-14" />
                 </div>
 
-                <div className="flex gap-3">
-                  <Button type="submit" className="bg-blue-600 hover:bg-blue-700 rounded-xl shadow-sm">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div className="space-y-2">
+                    <Label>Kelas</Label>
+                    <Select value={selectedClassId} onValueChange={setSelectedClassId}>
+                      <SelectTrigger className="h-14 bg-white">
+                        <SelectValue placeholder="Pilih kelas" />
+                      </SelectTrigger>
+                      <SelectContent className="z-[9999] bg-white border border-gray-200 shadow-xl rounded-xl p-1">
+                        {classes.map((kelas) => (
+                          <SelectItem key={kelas.id} value={kelas.id} className="cursor-pointer rounded-md px-3 py-3 text-base text-gray-900 outline-none transition-colors data-[highlighted]:bg-blue-50 data-[highlighted]:text-blue-700">
+                            {kelas.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label>Deadline</Label>
+                    <Input type="date" value={deadline} onChange={(e) => setDeadline(e.target.value)} className="h-14" />
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Deskripsi Proyek</Label>
+                  <Textarea placeholder="Jelaskan tentang proyek ini secara detail..." value={description} onChange={(e) => setDescription(e.target.value)} className="min-h-[140px]" />
+                </div>
+
+                {projectType === "group" && (
+                  <div className="space-y-2">
+                    <Label>Jumlah Anggota per Kelompok</Label>
+                    <Input type="number" min={2} value={membersPerGroup} onChange={(e) => setMembersPerGroup(Number(e.target.value))} className="h-14" />
+                  </div>
+                )}
+
+                <div className="flex gap-3 pt-2">
+                  <Button type="submit" className="bg-blue-600 hover:bg-blue-700 rounded-xl shadow-sm h-12 px-6">
                     <Plus className="w-4 h-4 mr-2" />
                     Buat Proyek
                   </Button>
-                  <Button type="button" variant="outline" onClick={() => setShowCreateForm(false)}>
+                  <Button type="button" variant="outline" onClick={() => setShowCreateForm(false)} className="h-12 px-6">
                     Batal
                   </Button>
                 </div>
@@ -325,7 +383,7 @@ export default function TeacherProjects({ onNavigate }: TeacherProjectsProps) {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {filteredProjects.map((project) => {
             const progress = calculateProjectProgress(project);
-            const participantCount = project.type === "group" ? project.groups?.length || 0 : project.students?.length || 0;
+            const participantCount = project.type === "group" ? project.membersPerGroup || 0 : 1;
 
             return (
               <Card key={project.id} className="border-0 shadow-lg hover:shadow-2xl transition-all cursor-pointer group overflow-hidden" onClick={() => setSelectedProjectDetail(project)}>
@@ -395,7 +453,7 @@ export default function TeacherProjects({ onNavigate }: TeacherProjectsProps) {
 
                 <CardContent className="pt-0">
                   <div className="space-y-3">
-                    <div className="grid grid-cols-2 gap-3">
+                    <div className="grid grid-cols-1 gap-3">
                       <div className="flex items-center gap-2 text-sm">
                         <div className="bg-blue-100 p-2 rounded-lg">
                           <Calendar className="w-4 h-4 text-blue-600" />
@@ -403,16 +461,6 @@ export default function TeacherProjects({ onNavigate }: TeacherProjectsProps) {
                         <div>
                           <p className="text-xs text-gray-500">Deadline</p>
                           <p className="text-blue-900 text-xs">{project.deadline}</p>
-                        </div>
-                      </div>
-
-                      <div className="flex items-center gap-2 text-sm">
-                        <div className="bg-yellow-100 p-2 rounded-lg">
-                          <Zap className="w-4 h-4 text-yellow-600" />
-                        </div>
-                        <div>
-                          <p className="text-xs text-gray-500">XP Points</p>
-                          <p className="text-blue-900 text-xs">+{project.points}</p>
                         </div>
                       </div>
                     </div>
@@ -438,7 +486,7 @@ export default function TeacherProjects({ onNavigate }: TeacherProjectsProps) {
                         className="border-blue-300 text-blue-600 hover:bg-blue-50"
                         onClick={(e) => {
                           e.stopPropagation();
-                          onNavigate("teacher-evaluation"); // ✅ FIX: bukan "evaluation"
+                          onNavigate("teacher-evaluation");
                         }}
                       >
                         <CheckCircle2 className="w-4 h-4 mr-1" />
