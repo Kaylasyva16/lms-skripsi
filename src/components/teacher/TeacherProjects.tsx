@@ -10,15 +10,16 @@ import { Separator } from "../ui/separator";
 import { RadioGroup, RadioGroupItem } from "../ui/radio-group";
 
 import TeacherProjectDetail from "./TeacherProjectDetail";
-import ProjectProgressDetail from "./ProjectProgressDetail"; // ✅ WAJIB (tadi belum ada)
+import ProjectProgressDetail from "./ProjectProgressDetail";
 
-import { Briefcase, Plus, Users, Calendar, CheckCircle2, Award, User, Eye, Search, Filter, TrendingUp, Zap } from "lucide-react";
+import { Briefcase, Plus, Users, Calendar, CheckCircle2, Award, User, Eye, Search, Filter, TrendingUp } from "lucide-react";
 
 interface TeacherProjectsProps {
   onNavigate: (page: string) => void;
+  onViewEvaluation: (projectId: number | string) => void;
 }
 
-export default function TeacherProjects({ onNavigate }: TeacherProjectsProps) {
+export default function TeacherProjects({ onNavigate, onViewEvaluation }: TeacherProjectsProps) {
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [projectType, setProjectType] = useState<"individual" | "group">("group");
   const [showProgressDetail, setShowProgressDetail] = useState(false);
@@ -30,6 +31,9 @@ export default function TeacherProjects({ onNavigate }: TeacherProjectsProps) {
   const [projects, setProjects] = useState<any[]>([]);
   const [classes, setClasses] = useState<{ id: string; name: string }[]>([]);
   const [selectedClassId, setSelectedClassId] = useState("");
+
+  const [projectProgressMap, setProjectProgressMap] = useState<Record<number, number>>({});
+  const [projectGroupCountMap, setProjectGroupCountMap] = useState<Record<number, number>>({});
 
   const [title, setTitle] = useState("");
   const [deadline, setDeadline] = useState("");
@@ -63,6 +67,71 @@ export default function TeacherProjects({ onNavigate }: TeacherProjectsProps) {
     fetchClasses();
   }, []);
 
+  const fetchProjectProgress = async (projectList: any[]) => {
+    try {
+      const token = localStorage.getItem("token");
+
+      const results = await Promise.all(
+        projectList.map(async (project) => {
+          try {
+            const res = await fetch(`http://localhost:5000/api/guru/projects/${project.id}/monitoring`, {
+              headers: {
+                Authorization: `Bearer ${token}`,
+              },
+            });
+
+            const data = await res.json();
+
+            if (!res.ok) {
+              return {
+                projectId: project.id,
+                progress: 0,
+                groupCount: 0,
+              };
+            }
+
+            const groups = Array.isArray(data.groups) ? data.groups : [];
+
+            const avgProgress =
+              groups.length > 0
+                ? Math.round(
+                    groups.reduce((sum: number, group: any) => {
+                      return sum + (group.overallProgress?.percentage || 0);
+                    }, 0) / groups.length
+                  )
+                : 0;
+
+            return {
+              projectId: project.id,
+              progress: avgProgress,
+              groupCount: groups.length,
+            };
+          } catch (error) {
+            console.error(`Monitoring error for project ${project.id}:`, error);
+            return {
+              projectId: project.id,
+              progress: 0,
+              groupCount: 0,
+            };
+          }
+        })
+      );
+
+      const progressMap: Record<number, number> = {};
+      const groupCountMap: Record<number, number> = {};
+
+      results.forEach((item) => {
+        progressMap[item.projectId] = item.progress;
+        groupCountMap[item.projectId] = item.groupCount;
+      });
+
+      setProjectProgressMap(progressMap);
+      setProjectGroupCountMap(groupCountMap);
+    } catch (err) {
+      console.error("Fetch project progress error:", err);
+    }
+  };
+
   useEffect(() => {
     const fetchProjects = async () => {
       try {
@@ -83,7 +152,9 @@ export default function TeacherProjects({ onNavigate }: TeacherProjectsProps) {
           return;
         }
 
-        setProjects(Array.isArray(data) ? data : []);
+        const projectList = Array.isArray(data) ? data : [];
+        setProjects(projectList);
+        await fetchProjectProgress(projectList);
       } catch (error) {
         console.error("Fetch projects error:", error);
         setProjects([]);
@@ -115,6 +186,7 @@ export default function TeacherProjects({ onNavigate }: TeacherProjectsProps) {
       ...group,
       type: project.type,
       projectTitle: project.title,
+      projectId: project.id,
     });
     setShowProgressDetail(true);
   };
@@ -151,7 +223,10 @@ export default function TeacherProjects({ onNavigate }: TeacherProjectsProps) {
       if (!res.ok) throw new Error("Gagal membuat proyek");
 
       const newProject = await res.json();
-      setProjects((prev) => [newProject, ...prev]);
+
+      const updatedProjects = [newProject, ...projects];
+      setProjects(updatedProjects);
+      await fetchProjectProgress(updatedProjects);
 
       setTitle("");
       setSelectedClassId("");
@@ -176,7 +251,7 @@ export default function TeacherProjects({ onNavigate }: TeacherProjectsProps) {
     : [];
 
   const calculateProjectProgress = (project: any) => {
-    return 0;
+    return projectProgressMap[project.id] || 0;
   };
 
   if (showProgressDetail && selectedGroupForProgress) {
@@ -187,22 +262,9 @@ export default function TeacherProjects({ onNavigate }: TeacherProjectsProps) {
     return <TeacherProjectDetail project={selectedProjectDetail} onBack={() => setSelectedProjectDetail(null)} onNavigate={onNavigate} onViewProgress={handleViewProgress} />;
   }
 
-  const formatDate = (dateString: string) => {
-    if (!dateString) return "-";
-
-    const date = new Date(dateString);
-
-    return date.toLocaleDateString("id-ID", {
-      day: "2-digit",
-      month: "short",
-      year: "numeric",
-    });
-  };
-
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-blue-50">
       <div className="p-8">
-        {/* Header */}
         <div className="mb-8">
           <div className="flex items-center justify-between">
             <div>
@@ -217,15 +279,12 @@ export default function TeacherProjects({ onNavigate }: TeacherProjectsProps) {
           </div>
         </div>
 
-        {/* Search and Filter */}
         <div className="flex items-center gap-4 w-full mb-8">
-          {/* Search */}
           <div className="relative flex-1">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-5 h-5" />
             <Input placeholder="Cari proyek berdasarkan nama atau kelas..." className="pl-10 w-full bg-white border-gray-200 focus:border-blue-500" value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} />
           </div>
 
-          {/* Filter */}
           <Select value={filterStatus} onValueChange={(value: any) => setFilterStatus(value)}>
             <SelectTrigger className="w-56 bg-white">
               <Filter className="w-4 h-4 mr-2" />
@@ -239,7 +298,6 @@ export default function TeacherProjects({ onNavigate }: TeacherProjectsProps) {
           </Select>
         </div>
 
-        {/* Stats Cards */}
         <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
           <Card className="border-0 shadow-lg bg-gradient-to-br from-blue-500 to-blue-600 text-white overflow-hidden">
             <CardContent className="pt-6">
@@ -248,7 +306,7 @@ export default function TeacherProjects({ onNavigate }: TeacherProjectsProps) {
                 <p className="text-sm opacity-90">Total Proyek</p>
               </div>
               <p className="text-4xl mb-1">{projects.length}</p>
-              <p className="text-xs opacity-75">Proyek Aktif</p>
+              <p className="text-xs opacity-75">Semua proyek</p>
             </CardContent>
           </Card>
 
@@ -259,7 +317,7 @@ export default function TeacherProjects({ onNavigate }: TeacherProjectsProps) {
                 <p className="text-sm opacity-90">Proyek Aktif</p>
               </div>
               <p className="text-4xl mb-1">{projects.filter((p) => p.status === "active").length}</p>
-              <p className="text-xs opacity-75">Sedang Berjalan</p>
+              <p className="text-xs opacity-75">Sedang berjalan</p>
             </CardContent>
           </Card>
 
@@ -267,10 +325,10 @@ export default function TeacherProjects({ onNavigate }: TeacherProjectsProps) {
             <CardContent className="pt-6">
               <div className="flex items-center gap-3 mb-2">
                 <Users className="w-6 h-6" />
-                <p className="text-sm opacity-90">Total Siswa</p>
+                <p className="text-sm opacity-90">Total Kelompok</p>
               </div>
-              <p className="text-4xl mb-1">{projects.reduce((sum, p) => sum + (p.groups?.length || 0) * 3 + (p.students?.length || 0), 0)}</p>
-              <p className="text-xs opacity-75">Terlibat dalam Proyek</p>
+              <p className="text-4xl mb-1">{Object.values(projectGroupCountMap).reduce((sum, count) => sum + count, 0)}</p>
+              <p className="text-xs opacity-75">Kelompok terdaftar</p>
             </CardContent>
           </Card>
 
@@ -278,15 +336,23 @@ export default function TeacherProjects({ onNavigate }: TeacherProjectsProps) {
             <CardContent className="pt-6">
               <div className="flex items-center gap-3 mb-2">
                 <Award className="w-6 h-6" />
-                <p className="text-sm opacity-90">Rata-rata Nilai</p>
+                <p className="text-sm opacity-90">Rata-rata Progress</p>
               </div>
-              <p className="text-4xl mb-1">84.5</p>
-              <p className="text-xs opacity-75">Dari Semua Proyek</p>
+              <p className="text-4xl mb-1">
+                {projects.length > 0
+                  ? Math.round(
+                      projects.reduce((sum, project) => {
+                        return sum + (projectProgressMap[project.id] || 0);
+                      }, 0) / projects.length
+                    )
+                  : 0}
+                %
+              </p>
+              <p className="text-xs opacity-75">Dari semua proyek</p>
             </CardContent>
           </Card>
         </div>
 
-        {/* Create Project Form */}
         {showCreateForm && (
           <Card className="mb-8 border-2 border-blue-200 shadow-xl">
             <CardHeader className="bg-gradient-to-r from-blue-50 to-white pb-4 pt-6">
@@ -379,11 +445,10 @@ export default function TeacherProjects({ onNavigate }: TeacherProjectsProps) {
           </Card>
         )}
 
-        {/* Projects Grid */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {filteredProjects.map((project) => {
             const progress = calculateProjectProgress(project);
-            const participantCount = project.type === "group" ? project.membersPerGroup || 0 : 1;
+            const participantCount = project.type === "group" ? projectGroupCountMap[project.id] || 0 : 1;
 
             return (
               <Card key={project.id} className="border-0 shadow-lg hover:shadow-2xl transition-all cursor-pointer group overflow-hidden" onClick={() => setSelectedProjectDetail(project)}>
@@ -435,7 +500,7 @@ export default function TeacherProjects({ onNavigate }: TeacherProjectsProps) {
                         />
                       </svg>
                       <div className="absolute inset-0 flex items-center justify-center">
-                        <span className="text-sm text-blue-900">{progress}%</span>
+                        <span className="text-sm text-blue-900 font-medium">{progress}%</span>
                       </div>
                     </div>
 
@@ -486,7 +551,7 @@ export default function TeacherProjects({ onNavigate }: TeacherProjectsProps) {
                         className="border-blue-300 text-blue-600 hover:bg-blue-50"
                         onClick={(e) => {
                           e.stopPropagation();
-                          onNavigate("teacher-evaluation");
+                          onViewEvaluation(project.id);
                         }}
                       >
                         <CheckCircle2 className="w-4 h-4 mr-1" />

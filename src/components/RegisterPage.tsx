@@ -66,6 +66,15 @@ export function RegisterPage({ onBack, onSuccess }: RegisterPageProps) {
       return;
     }
 
+    console.log("REGISTER PAYLOAD:", {
+      nama: formData.fullName,
+      email: formData.email.toLowerCase(),
+      password: formData.password,
+      role: "siswa",
+      nis: formData.nis,
+      kelas: formData.className,
+    });
+
     try {
       const response = await fetch("http://localhost:5000/register", {
         method: "POST",
@@ -76,14 +85,17 @@ export function RegisterPage({ onBack, onSuccess }: RegisterPageProps) {
           nama: formData.fullName,
           email: formData.email.toLowerCase(),
           password: formData.password,
-          role: "siswa", // WAJIB sesuai backend
+          role: "siswa",
+          nis: formData.nis,
+          kelas: formData.className,
         }),
       });
 
       const data = await response.json();
 
       if (!response.ok) {
-        toast.error(data.message || "Register gagal");
+        toast.error(data.error || data.message || "Register gagal");
+        console.log("REGISTER RESPONSE ERROR:", data);
         return;
       }
 

@@ -50,8 +50,13 @@ export default function TambahSiswa({ open, onClose, onSubmit, initialData, kela
 
   /* ================= VALIDATION ================= */
   const validate = () => {
-    if (!nis || !nama || !email || !password || !kelas) {
-      setError("Semua field wajib diisi");
+    if (!nis || !nama || !email || !kelas) {
+      setError("NIS, nama, email, dan kelas wajib diisi");
+      return false;
+    }
+
+    if (!initialData && !password) {
+      setError("Password wajib diisi");
       return false;
     }
 
@@ -61,14 +66,14 @@ export default function TambahSiswa({ open, onClose, onSubmit, initialData, kela
       return false;
     }
 
-    const nisExists = siswaList?.some((s: any, i: number) => s.nis === nis && (!initialData || i !== initialData.index));
+    const nisExists = siswaList?.some((s: any) => s.nis === nis && (!initialData || s.id !== initialData.id));
 
     if (nisExists) {
       setError("NIS sudah digunakan");
       return false;
     }
 
-    const emailExists = siswaList?.some((s: any, i: number) => s.email.toLowerCase() === email.toLowerCase() && (!initialData || i !== initialData.index));
+    const emailExists = siswaList?.some((s: any) => (s.email || "").toLowerCase() === email.toLowerCase() && (!initialData || s.id !== initialData.id));
 
     if (emailExists) {
       setError("Email sudah digunakan");
@@ -79,7 +84,7 @@ export default function TambahSiswa({ open, onClose, onSubmit, initialData, kela
     return true;
   };
 
-  const isValid = nis.trim() !== "" && nama.trim() !== "" && email.trim() !== "" && password.trim() !== "" && kelas.trim() !== "";
+  const isValid = nis.trim() !== "" && nama.trim() !== "" && email.trim() !== "" && kelas.trim() !== "" && (initialData ? true : password.trim() !== "");
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center">

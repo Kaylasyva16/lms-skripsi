@@ -99,8 +99,7 @@ export const StudentEssayDetail: React.FC<StudentEssayDetailProps> = ({ submissi
 
     if (validScores.length === 0) return 0;
 
-    const total = validScores.reduce((sum, score) => sum + score, 0);
-    return Math.round(total / validScores.length);
+    return validScores.reduce((sum, score) => sum + score, 0);
   };
 
   const handleSave = async () => {
@@ -180,7 +179,7 @@ export const StudentEssayDetail: React.FC<StudentEssayDetailProps> = ({ submissi
           </div>
 
           <div className="text-center">
-            <div className="text-sm text-gray-600 mb-1">Nilai Total</div>
+            <div className="text-sm text-gray-600 mb-1">Rata-rata Nilai</div>
             <div className="text-4xl font-bold text-blue-600">{calculateTotalScore()}</div>
           </div>
         </div>

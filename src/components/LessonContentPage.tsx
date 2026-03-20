@@ -60,7 +60,9 @@ export function LessonContentPage({ moduleId, onClose }: LessonContentPageProps)
   useEffect(() => {
     if (!moduleId) return;
 
-    const siswaId = 1;
+    const user = JSON.parse(localStorage.getItem("user") || "{}");
+    const siswaId = user.id;
+
     fetch(`http://localhost:5000/api/modules/${moduleId}/materials?siswaId=${siswaId}`)
       .then((res) => res.json())
       .then((data) => {
@@ -192,7 +194,8 @@ export function LessonContentPage({ moduleId, onClose }: LessonContentPageProps)
   const handleComplete = async () => {
     if (!currentLesson) return;
 
-    const userId = 1;
+    const user = JSON.parse(localStorage.getItem("user") || "{}");
+    const userId = user.id;
     const materiId = currentLesson.id;
 
     await fetch("http://localhost:5000/materi/selesai", {

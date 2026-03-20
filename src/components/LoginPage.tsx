@@ -17,10 +17,11 @@ export function LoginPage({ onLogin, onRegister }: LoginPageProps) {
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    console.log("LOGIN BUTTON CLICKED");
     setLoading(true);
 
     try {
+      localStorage.clear();
+
       const response = await fetch("http://localhost:5000/login", {
         method: "POST",
         headers: {
@@ -34,14 +35,27 @@ export function LoginPage({ onLogin, onRegister }: LoginPageProps) {
 
       if (!response.ok) {
         alert(data.message || "Login gagal");
-        setLoading(false);
         return;
       }
 
-      // Simpan token & role
       localStorage.setItem("token", data.token);
       localStorage.setItem("role", data.role);
-      localStorage.setItem("user", JSON.stringify(data.user));
+
+      const meResponse = await fetch("http://localhost:5000/me", {
+        headers: {
+          Authorization: `Bearer ${data.token}`,
+        },
+      });
+
+      const meData = await meResponse.json();
+      console.log("ME RESPONSE:", meData);
+
+      if (!meResponse.ok) {
+        alert(meData.message || "Gagal mengambil data user");
+        return;
+      }
+
+      localStorage.setItem("user", JSON.stringify(meData));
 
       onLogin(data.role);
     } catch (error) {

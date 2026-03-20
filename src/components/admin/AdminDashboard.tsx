@@ -331,7 +331,7 @@ const KelolaGuru = ({ guruList, setGuruList, mapelList }: any) => {
             <tbody className="divide-y">
               {filteredGuru.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="text-center py-6 text-gray-400">
+                  <td colSpan={6} className="text-center py-6 text-gray-400">
                     {search ? "Data tidak ditemukan" : "Belum ada data guru"}
                   </td>
                 </tr>
@@ -839,19 +839,59 @@ const KelolaKelas = ({ kelasList, setKelasList, guruList }: any) => {
 };
 
 /* ================= KELOLA SISWA ================= */
+
 const KelolaSiswa = ({ siswaList, setSiswaList, kelasList }: any) => {
   const [search, setSearch] = useState("");
   const [openTambahSiswa, setOpenTambahSiswa] = useState(false);
   const [editSiswa, setEditSiswa] = useState<any | null>(null);
 
-  const handleEditSiswa = (siswa: any, index: number) => {
-    setEditSiswa({ ...siswa, index });
+  const fetchSiswa = async () => {
+    try {
+      const token = localStorage.getItem("token");
+
+      const res = await fetch("http://localhost:5000/siswa", {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      const data = await res.json();
+      setSiswaList(data);
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleEditSiswa = (siswa: any) => {
+    setEditSiswa(siswa);
     setOpenTambahSiswa(true);
   };
 
-  const handleHapusSiswa = (index: number) => {
+  const handleHapusSiswa = async (id: number) => {
     if (!confirm("Yakin ingin menghapus data siswa ini?")) return;
-    setSiswaList((prev: any[]) => prev.filter((_, i) => i !== index));
+
+    try {
+      const token = localStorage.getItem("token");
+
+      const res = await fetch(`http://localhost:5000/siswa/${id}`, {
+        method: "DELETE",
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      const result = await res.json();
+
+      if (!res.ok) {
+        alert(result.message || result.error || "Gagal menghapus siswa");
+        return;
+      }
+
+      await fetchSiswa();
+    } catch (err) {
+      console.error(err);
+      alert("Gagal menghapus siswa");
+    }
   };
 
   const capitalizeWords = (text: string) => {
@@ -863,28 +903,67 @@ const KelolaSiswa = ({ siswaList, setSiswaList, kelasList }: any) => {
       .join(" ");
   };
 
-  const handleSubmitSiswa = (data: any) => {
+  const handleSubmitSiswa = async (data: any) => {
+    const token = localStorage.getItem("token");
+
     const formattedData = {
       ...data,
       nama: capitalizeWords(data.nama),
     };
 
-    if (editSiswa !== null) {
-      setSiswaList((prev: any[]) => prev.map((s, i) => (i === editSiswa.index ? formattedData : s)));
-    } else {
-      setSiswaList((prev: any[]) => [...prev, formattedData]);
-    }
+    try {
+      let res;
 
-    setEditSiswa(null);
-    setOpenTambahSiswa(false);
+      if (editSiswa !== null) {
+        res = await fetch(`http://localhost:5000/siswa/${editSiswa.id}`, {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify(formattedData),
+        });
+      } else {
+        res = await fetch("http://localhost:5000/siswa", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify(formattedData),
+        });
+      }
+
+      const result = await res.json();
+
+      if (!res.ok) {
+        alert(result.message || result.error || "Gagal menyimpan siswa");
+        return;
+      }
+
+      await fetchSiswa();
+
+      setEditSiswa(null);
+      setOpenTambahSiswa(false);
+    } catch (err) {
+      console.error(err);
+      alert("Gagal menyimpan siswa");
+    }
   };
 
-  const filteredSiswa = siswaList.filter((s: any) => s.nama.toLowerCase().includes(search.toLowerCase()) || s.nis.toLowerCase().includes(search.toLowerCase()) || s.kelas.toLowerCase().includes(search.toLowerCase()));
+  const filteredSiswa = siswaList.filter(
+    (s: any) =>
+      (s.nama || "").toLowerCase().includes(search.toLowerCase()) ||
+      String(s.nis || "")
+        .toLowerCase()
+        .includes(search.toLowerCase()) ||
+      (s.email || "").toLowerCase().includes(search.toLowerCase()) ||
+      (s.kelas || "").toLowerCase().includes(search.toLowerCase())
+  );
 
   return (
     <>
       <div className="flex flex-col gap-8">
-        {/* ===== HEADER CARD ===== */}
         <div className="bg-white rounded-2xl border shadow-sm px-8 py-8 space-y-6">
           <div className="flex items-start justify-between">
             <div>
@@ -892,26 +971,23 @@ const KelolaSiswa = ({ siswaList, setSiswaList, kelasList }: any) => {
               <p className="text-gray-500 mt-1">Tambah, edit, dan hapus data siswa</p>
             </div>
 
-            <button onClick={() => setOpenTambahSiswa(true)} className="bg-blue-600 text-white px-6 py-3 rounded-full font-semibold hover:bg-blue-700 transition">
+            <button
+              onClick={() => {
+                setEditSiswa(null);
+                setOpenTambahSiswa(true);
+              }}
+              className="bg-blue-600 text-white px-6 py-3 rounded-full font-semibold hover:bg-blue-700 transition"
+            >
               + Tambah Siswa
             </button>
           </div>
 
-          {/* SEARCH */}
           <div className="relative">
-            <input
-              type="text"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Cari siswa..."
-              className="w-full h-14 rounded-full border px-6 pr-16 text-sm
-              focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
+            <input type="text" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Cari siswa..." className="w-full h-14 rounded-full border px-6 pr-16 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
             <Search size={20} className="absolute right-6 top-1/2 -translate-y-1/2 text-gray-400" />
           </div>
         </div>
 
-        {/* ===== TABLE ===== */}
         <div className="mt-10 bg-white rounded-2xl border shadow-sm overflow-hidden">
           <table className="w-full table-fixed">
             <thead className="bg-gray-50 text-xs uppercase text-gray-500">
@@ -919,6 +995,7 @@ const KelolaSiswa = ({ siswaList, setSiswaList, kelasList }: any) => {
                 <th className="px-8 py-4 text-left w-[80px]">No</th>
                 <th className="px-8 py-4 text-left w-[160px]">NIS</th>
                 <th className="px-8 py-4 text-left">Nama</th>
+                <th className="px-8 py-4 text-left">Email</th>
                 <th className="px-8 py-4 text-left w-[180px]">Kelas</th>
                 <th className="px-8 py-4 text-center w-[120px]">Aksi</th>
               </tr>
@@ -927,37 +1004,25 @@ const KelolaSiswa = ({ siswaList, setSiswaList, kelasList }: any) => {
             <tbody className="divide-y">
               {filteredSiswa.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="text-center py-6 text-gray-400">
+                  <td colSpan={6} className="text-center py-6 text-gray-400">
                     {search ? "Data tidak ditemukan" : "Belum ada data siswa"}
                   </td>
                 </tr>
               ) : (
-                filteredSiswa.map((siswa, i) => (
-                  <tr key={i} className="hover:bg-gray-50 transition">
+                filteredSiswa.map((siswa: any, i: number) => (
+                  <tr key={siswa.id || i} className="hover:bg-gray-50 transition">
                     <td className="px-8 py-4">{i + 1}</td>
-
-                    <td className="px-8 py-4 font-semibold">{siswa.nis}</td>
-
-                    <td className="px-8 py-4">{siswa.nama}</td>
-
-                    <td className="px-8 py-4">
-                      <span
-                        className="inline-flex items-center
-                        bg-blue-50 text-blue-600
-                        px-4 py-1.5 rounded-full
-                        text-xs font-semibold"
-                      >
-                        {siswa.kelas}
-                      </span>
-                    </td>
-
+                    <td className="px-8 py-4 font-semibold">{siswa.nis || "-"}</td>
+                    <td className="px-8 py-4">{siswa.nama || "-"}</td>
+                    <td className="px-8 py-4 text-gray-600">{siswa.email || "-"}</td>
+                    <td className="px-8 py-4">{siswa.kelas ? <span className="inline-flex items-center bg-blue-50 text-blue-600 px-4 py-1.5 rounded-full text-xs font-semibold">{siswa.kelas}</span> : "-"}</td>
                     <td className="px-6 py-4 text-center">
                       <div className="flex items-center justify-center gap-4">
-                        <button onClick={() => handleEditSiswa(siswa, i)} className="text-blue-600 hover:text-blue-700 transition">
+                        <button onClick={() => handleEditSiswa(siswa)} className="text-blue-600 hover:text-blue-700 transition">
                           <Pencil size={20} />
                         </button>
 
-                        <button onClick={() => handleHapusSiswa(i)} className="text-red-600 hover:text-red-700 transition">
+                        <button onClick={() => handleHapusSiswa(siswa.id)} className="text-red-600 hover:text-red-700 transition">
                           <Trash2 size={20} />
                         </button>
                       </div>
@@ -970,7 +1035,6 @@ const KelolaSiswa = ({ siswaList, setSiswaList, kelasList }: any) => {
         </div>
       </div>
 
-      {/* ===== MODAL ===== */}
       <TambahSiswa
         open={openTambahSiswa}
         onClose={() => {
@@ -1094,7 +1158,7 @@ export default function AdminDashboard() {
   }, []);
 
   const handleLogout = () => {
-    localStorage.removeItem("token");
+    localStorage.clear();
     window.location.href = "/login";
   };
 

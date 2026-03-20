@@ -54,13 +54,20 @@ export function ProjectPage() {
   const [members, setMembers] = useState<Member[]>([]);
   const [classmates, setClassmates] = useState<Classmate[]>([]);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
-  const [newMember, setNewMember] = useState({ studentId: "", status: "Anggota", role: "" });
+  const [newMember, setNewMember] = useState({
+    studentId: "",
+    status: "Anggota",
+    role: "",
+  });
   const [showDetail, setShowDetail] = useState(false);
   const [loading, setLoading] = useState(true);
   const [loadingMembers, setLoadingMembers] = useState(false);
   const [editingMember, setEditingMember] = useState<Member | null>(null);
   const [successMessage, setSuccessMessage] = useState("");
   const [errorMessage, setErrorMessage] = useState("");
+  const [groupName, setGroupName] = useState("");
+  const [savingGroupName, setSavingGroupName] = useState(false);
+  const [projectDetail, setProjectDetail] = useState<any>(null);
 
   const fetchProjects = async () => {
     try {
@@ -109,22 +116,23 @@ export function ProjectPage() {
 
       const data = await parseResponse(res);
       console.log("FETCH MEMBERS RESPONSE:", data);
-      console.log("FETCH MEMBERS ARRAY:", data.members);
-      console.log("FETCH FIRST MEMBER:", data.members?.[0]);
 
       if (!res.ok) {
         setErrorMessage(data.message || "Gagal mengambil anggota kelompok");
         setTimeout(() => setErrorMessage(""), 3000);
         setMembers([]);
+        setGroupName("");
         return;
       }
 
       setMembers(Array.isArray(data.members) ? data.members : []);
+      setGroupName(data.group?.groupName || "");
     } catch (error) {
       console.error(error);
       setErrorMessage("Terjadi kesalahan saat mengambil anggota kelompok");
       setTimeout(() => setErrorMessage(""), 3000);
       setMembers([]);
+      setGroupName("");
     } finally {
       setLoadingMembers(false);
     }
@@ -162,15 +170,99 @@ export function ProjectPage() {
     fetchProjects();
   }, []);
 
+  const fetchProjectDetail = async (projectId: number) => {
+    try {
+      const token = localStorage.getItem("token");
+
+      const res = await fetch(`http://localhost:5000/api/student/projects/${projectId}/detail`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      const data = await parseResponse(res);
+      console.log("PROJECT DETAIL RESPONSE:", data);
+
+      if (!res.ok) {
+        setErrorMessage(data.message || "Gagal mengambil detail project");
+        setTimeout(() => setErrorMessage(""), 3000);
+        setProjectDetail(null);
+        return;
+      }
+
+      setProjectDetail(data);
+    } catch (error) {
+      console.error(error);
+      setErrorMessage("Terjadi kesalahan saat mengambil detail project");
+      setTimeout(() => setErrorMessage(""), 3000);
+      setProjectDetail(null);
+    }
+  };
+
   useEffect(() => {
-    if (selectedProject?.type === "group") {
+    if (!selectedProject) {
+      setProjectDetail(null);
+      return;
+    }
+
+    fetchProjectDetail(selectedProject.id);
+
+    if (selectedProject.type === "group") {
       fetchMembers(selectedProject.id);
       fetchClassmates(selectedProject.id);
     } else {
       setMembers([]);
       setClassmates([]);
+      setGroupName("");
     }
   }, [selectedProject]);
+
+  const handleSaveGroupName = async () => {
+    if (!selectedProject) return;
+
+    if (!groupName.trim()) {
+      setErrorMessage("Nama kelompok wajib diisi");
+      setTimeout(() => setErrorMessage(""), 3000);
+      return;
+    }
+
+    try {
+      setSavingGroupName(true);
+      const token = localStorage.getItem("token");
+
+      const res = await fetch(`http://localhost:5000/api/student/projects/${selectedProject.id}/group/name`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          groupName,
+        }),
+      });
+
+      const data = await parseResponse(res);
+
+      if (!res.ok) {
+        setErrorMessage(data.message || "Gagal menyimpan nama kelompok");
+        setTimeout(() => setErrorMessage(""), 3000);
+        return;
+      }
+
+      setSuccessMessage("Nama kelompok berhasil disimpan!");
+      setTimeout(() => setSuccessMessage(""), 3000);
+
+      setGroupName(data.group?.groupName || groupName);
+      fetchMembers(selectedProject.id);
+    } catch (error) {
+      console.error(error);
+      setErrorMessage("Terjadi kesalahan saat menyimpan nama kelompok");
+      setTimeout(() => setErrorMessage(""), 3000);
+    } finally {
+      setSavingGroupName(false);
+    }
+  };
+
   const handleSaveMember = async () => {
     if (!selectedProject) return;
 
@@ -200,10 +292,6 @@ export function ProjectPage() {
         role: newMember.role,
       };
 
-      console.log("SAVE MEMBER URL:", url);
-      console.log("SAVE MEMBER METHOD:", method);
-      console.log("SAVE MEMBER PAYLOAD:", payload);
-
       const res = await fetch(url, {
         method,
         headers: {
@@ -214,11 +302,9 @@ export function ProjectPage() {
       });
 
       const data = await parseResponse(res);
-      console.log("SAVE MEMBER STATUS:", res.status);
-      console.log("SAVE MEMBER RESPONSE:", data);
 
       if (!res.ok) {
-        const safeMessage = typeof data.message === "string" && !data.message.includes("<!DOCTYPE") ? data.message : isEdit ? "Gagal mengubah anggota" : "Gagal menambahkan anggota";
+        const safeMessage = typeof data.message === "string" ? data.message : isEdit ? "Gagal mengubah anggota" : "Gagal menambahkan anggota";
 
         setErrorMessage(safeMessage);
         setTimeout(() => setErrorMessage(""), 3000);
@@ -254,13 +340,7 @@ export function ProjectPage() {
   };
 
   const handleDeleteMember = async (memberId?: number) => {
-    console.log("DELETE memberId:", memberId);
-    console.log("selectedProject:", selectedProject);
-
-    if (!memberId || !selectedProject) {
-      console.log("memberId atau selectedProject kosong", { memberId, selectedProject });
-      return;
-    }
+    if (!memberId || !selectedProject) return;
 
     try {
       const token = localStorage.getItem("token");
@@ -273,35 +353,49 @@ export function ProjectPage() {
       });
 
       const data = await parseResponse(res);
-      console.log("DELETE status:", res.status);
-      console.log("DELETE response:", data);
 
       if (!res.ok) {
-        alert(data.message || "Gagal menghapus anggota");
+        setErrorMessage(data.message || "Gagal menghapus anggota");
+        setTimeout(() => setErrorMessage(""), 3000);
         return;
       }
 
-      alert("Anggota berhasil dihapus");
+      setSuccessMessage("Anggota berhasil dihapus!");
+      setTimeout(() => setSuccessMessage(""), 3000);
       fetchMembers(selectedProject.id);
     } catch (error) {
       console.error(error);
-      alert("Terjadi kesalahan saat menghapus anggota");
+      setErrorMessage("Terjadi kesalahan saat menghapus anggota");
+      setTimeout(() => setErrorMessage(""), 3000);
     }
   };
 
-  const availableClassmates = classmates.filter((student) => !members.some((member) => member.studentId === student.id));
+  const availableClassmates = classmates.filter((student) => editingMember?.studentId === student.id || !members.some((member) => member.studentId === student.id));
 
   const getStatusLabel = (status?: string) => {
     if (status === "active") return "Sedang Dikerjakan";
     if (status === "completed") return "Selesai";
-    return "-";
+    if (status === "Dinilai") return "Dinilai";
+    if (status === "Sedang Dikerjakan") return "Sedang Dikerjakan";
+    if (status === "belum_mengerjakan") return "Belum Dikerjakan";
+    return status || "-";
   };
-
   const getStatusBadgeClass = (status?: string) => {
-    if (status === "active") return "bg-orange-500 hover:bg-orange-600";
-    if (status === "completed") return "bg-green-500 hover:bg-green-600";
+    if (status === "active" || status === "Sedang Dikerjakan") {
+      return "bg-orange-500 hover:bg-orange-600";
+    }
+
+    if (status === "completed" || status === "Selesai" || status === "Dinilai") {
+      return "bg-green-500 hover:bg-green-600";
+    }
+
+    if (status === "belum_mengerjakan" || status === "Belum Dikerjakan") {
+      return "bg-gray-400 hover:bg-gray-500";
+    }
+
     return "bg-gray-400 hover:bg-gray-500";
   };
+
   if (showDetail && selectedProject) {
     return <ProjectDetailPage projectId={selectedProject.id} onClose={() => setShowDetail(false)} />;
   }
@@ -337,6 +431,14 @@ export function ProjectPage() {
       </div>
     );
   }
+
+  const detailProject = projectDetail?.project;
+
+  const displayScore = detailProject?.score !== null && detailProject?.score !== undefined ? Number(detailProject.score) : null;
+
+  const displayStatus = detailProject?.status || getStatusLabel(selectedProject.status);
+
+  const displayDeadline = detailProject?.deadline || selectedProject.deadline;
 
   return (
     <div className="space-y-6">
@@ -409,7 +511,7 @@ export function ProjectPage() {
               </div>
               <div>
                 <p className="text-sm text-gray-600 mb-1">Tenggat Waktu</p>
-                <p className="text-gray-900">{selectedProject.deadline || "-"}</p>
+                <p className="text-gray-900">{displayDeadline || "-"}</p>
               </div>
             </div>
 
@@ -419,8 +521,8 @@ export function ProjectPage() {
               </div>
               <div>
                 <p className="text-sm text-gray-600 mb-1">Nilai</p>
-                <p className="text-gray-900">-</p>
-                <p className="text-xs text-gray-500">Belum dinilai</p>
+                <p className="text-gray-900">{displayScore !== null ? displayScore : "-"}</p>
+                <p className="text-xs text-gray-500">{displayScore !== null ? "Sudah dinilai" : "Belum dinilai"}</p>
               </div>
             </div>
 
@@ -430,7 +532,7 @@ export function ProjectPage() {
               </div>
               <div>
                 <p className="text-sm text-gray-600 mb-1">Status</p>
-                <Badge className={getStatusBadgeClass(selectedProject.status)}>{getStatusLabel(selectedProject.status)}</Badge>
+                <Badge className={getStatusBadgeClass(displayStatus)}>{getStatusLabel(displayStatus)}</Badge>
               </div>
             </div>
           </div>
@@ -561,6 +663,16 @@ export function ProjectPage() {
           </CardHeader>
 
           <CardContent>
+            <div className="mb-4">
+              <Label className="block mb-2">Nama Kelompok</Label>
+              <div className="flex gap-2 max-w-md">
+                <input type="text" value={groupName} onChange={(e) => setGroupName(e.target.value)} placeholder="Masukkan nama kelompok" className="flex-1 h-10 rounded-md border border-gray-300 px-3 text-sm" />
+                <Button onClick={handleSaveGroupName} disabled={savingGroupName} className="bg-blue-500 hover:bg-blue-600">
+                  {savingGroupName ? "Menyimpan..." : "Simpan"}
+                </Button>
+              </div>
+            </div>
+
             <div className="border rounded-lg overflow-hidden">
               <Table>
                 <TableHeader>

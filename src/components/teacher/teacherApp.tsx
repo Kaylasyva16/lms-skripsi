@@ -9,6 +9,7 @@ import TeacherGrades from "./TeacherGrades";
 import TeacherEvaluation from "./TeacherEvaluation";
 import EssayGrading from "./EssayGrading";
 import StudentEssayDetail from "./StudentEssayDetail";
+import StudentGradeDetail from "./StudentGradeDetail";
 
 interface StudentSubmission {
   id: string;
@@ -24,21 +25,24 @@ interface StudentSubmission {
   totalScore?: number;
 }
 
-export type TeacherPage = "teacher-dashboard" | "teacher-materials" | "teacher-quiz" | "teacher-projects" | "teacher-grades" | "teacher-evaluation" | "essay-grading" | "student-essay-detail";
+export type TeacherPage = "teacher-dashboard" | "teacher-materials" | "teacher-quiz" | "teacher-projects" | "teacher-grades" | "teacher-evaluation" | "essay-grading" | "student-essay-detail" | "student-detail";
 
 export default function TeacherApp() {
   const [currentPage, setCurrentPage] = useState<TeacherPage>("teacher-dashboard");
+  const [selectedProjectId, setSelectedProjectId] = useState<number | string | null>(null);
 
   const [essayGradingData, setEssayGradingData] = useState<{ quizId: string; quizTitle: string } | null>(null);
   const [studentDetailData, setStudentDetailData] = useState<{ submission: StudentSubmission; quizTitle: string } | null>(null);
 
+  const [selectedStudentId, setSelectedStudentId] = useState<number | null>(null);
+
   const [refreshEssayListKey, setRefreshEssayListKey] = useState(0);
+  const [user, setUser] = useState<any>(null);
 
   const handleBackToEssayGrading = () => {
     setRefreshEssayListKey((prev) => prev + 1);
     setCurrentPage("essay-grading");
   };
-  const [user, setUser] = useState<any>(null);
 
   useEffect(() => {
     const fetchUser = async () => {
@@ -80,6 +84,11 @@ export default function TeacherApp() {
     setCurrentPage("student-essay-detail");
   };
 
+  const handleViewProjectEvaluation = (projectId: number | string) => {
+    setSelectedProjectId(projectId);
+    setCurrentPage("teacher-evaluation");
+  };
+
   const renderPage = () => {
     switch (currentPage) {
       case "teacher-dashboard":
@@ -92,13 +101,24 @@ export default function TeacherApp() {
         return <TeacherQuiz onNavigate={setCurrentPage} onLogout={handleLogout} onViewEssayGrading={handleViewEssayGrading} />;
 
       case "teacher-projects":
-        return <TeacherProjects onNavigate={setCurrentPage} />;
+        return <TeacherProjects onNavigate={setCurrentPage} onViewEvaluation={handleViewProjectEvaluation} />;
 
       case "teacher-grades":
-        return <TeacherGrades onNavigate={setCurrentPage} />;
+        return (
+          <TeacherGrades
+            onNavigate={setCurrentPage}
+            onViewStudentGradeDetail={(id) => {
+              setSelectedStudentId(id); // simpan id siswa
+              setCurrentPage("student-detail"); // pindah halaman
+            }}
+          />
+        );
+
+      case "student-detail":
+        return <StudentGradeDetail studentId={selectedStudentId} />;
 
       case "teacher-evaluation":
-        return <TeacherEvaluation onNavigate={setCurrentPage} onLogout={handleLogout} />;
+        return selectedProjectId ? <TeacherEvaluation onNavigate={setCurrentPage} projectId={selectedProjectId} /> : <TeacherProjects onNavigate={setCurrentPage} onViewEvaluation={handleViewProjectEvaluation} />;
 
       case "essay-grading":
         return essayGradingData ? (

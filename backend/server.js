@@ -16,6 +16,18 @@ dotenv.config();
 
 const app = express();
 
+function calculateWeightedScore(rubrics = []) {
+  let total = 0;
+
+  for (const item of rubrics) {
+    const score = Number(item.score || 0);
+    const weight = Number(item.weight || 0);
+    total += (score * weight) / 100;
+  }
+
+  return Number(total.toFixed(2));
+}
+
 // fungsi untuk mengubah bytes → MB
 function formatFileSize(bytes) {
   if (!bytes) return null;
@@ -64,22 +76,85 @@ app.get("/", (req, res) => {
 });
 
 app.post("/register", async (req, res) => {
+  const client = await pool.connect();
   const { nama, email, password, role, nis, kelas } = req.body;
 
   try {
-    const hashedPassword = await bcrypt.hash(password, 10);
-
-    await pool.query("INSERT INTO users (nama, email, password, role, nis, kelas) VALUES ($1,$2,$3,$4,$5,$6)", [nama, email.toLowerCase(), hashedPassword, role, nis, kelas]);
-
-    if (role === "siswa") {
-      await pool.query("INSERT INTO siswa (nis, nama, kelas) VALUES ($1,$2,$3)", [nis, nama, kelas]);
+    if (!nama || !email || !password || !role) {
+      return res.status(400).json({ message: "Data register tidak lengkap" });
     }
 
-    res.json({ message: "User berhasil dibuat" });
+    if (role === "siswa" && (!nis || !kelas)) {
+      return res.status(400).json({ message: "NIS dan kelas wajib diisi" });
+    }
+
+    await client.query("BEGIN");
+
+    const existingEmail = await client.query("SELECT id FROM users WHERE LOWER(email) = LOWER($1)", [email]);
+
+    if (existingEmail.rows.length > 0) {
+      await client.query("ROLLBACK");
+      return res.status(400).json({ message: "Email sudah terdaftar" });
+    }
+
+    if (role === "siswa") {
+      const existingNis = await client.query("SELECT id FROM users WHERE nis = $1", [nis]);
+
+      if (existingNis.rows.length > 0) {
+        await client.query("ROLLBACK");
+        return res.status(400).json({ message: "NIS sudah terdaftar" });
+      }
+    }
+
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    const userResult = await client.query(
+      `
+      INSERT INTO users (nama, email, password, role, nis, kelas)
+      VALUES ($1, $2, $3, $4, $5, $6)
+      RETURNING id, nama, email, role, nis, kelas
+      `,
+      [nama, email.toLowerCase(), hashedPassword, role, nis || null, kelas || null]
+    );
+
+    if (role === "siswa") {
+      await client.query(
+        `
+        INSERT INTO siswa (nis, nama, kelas)
+        VALUES ($1, $2, $3)
+        `,
+        [nis, nama, kelas]
+      );
+    }
+
+    await client.query("COMMIT");
+
+    res.status(201).json({
+      message: "User berhasil dibuat",
+      user: userResult.rows[0],
+    });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    await client.query("ROLLBACK");
+    console.error("REGISTER ERROR:", err);
+
+    if (err.code === "23505") {
+      if (err.constraint === "users_email_key") {
+        return res.status(400).json({ message: "Email sudah terdaftar" });
+      }
+
+      if (err.constraint === "users_nis_key") {
+        return res.status(400).json({ message: "NIS sudah terdaftar" });
+      }
+
+      return res.status(400).json({ message: "Data sudah terdaftar" });
+    }
+
+    res.status(500).json({ message: "Terjadi kesalahan pada server", error: err.message });
+  } finally {
+    client.release();
   }
 });
+
 app.post("/login", async (req, res) => {
   const { email, password } = req.body;
 
@@ -724,65 +799,239 @@ app.delete("/kelas/:id", authenticateToken, authorizeRole(["admin"]), async (req
 
 /// SISWA ///
 app.get("/siswa", authenticateToken, authorizeRole(["admin", "guru"]), async (req, res) => {
-  const result = await pool.query("SELECT id, nis, nama, kelas FROM users WHERE role = 'siswa' ORDER BY id ASC");
-
-  res.json(result.rows);
-});
-
-app.put("/siswa/:id", authenticateToken, authorizeRole(["admin"]), async (req, res) => {
-  const { id } = req.params;
-  const { nis, nama, kelas } = req.body;
-
   try {
-    const result = await pool.query("UPDATE users SET nis=$1, nama=$2, kelas=$3 WHERE id=$4 AND role='siswa' RETURNING id, nis, nama, kelas", [nis, nama, kelas, id]);
+    const result = await pool.query("SELECT id, nis, nama, email, kelas FROM users WHERE role = 'siswa' ORDER BY id ASC");
 
-    res.json(result.rows[0]);
+    console.log("HASIL /siswa:", result.rows);
+    res.json(result.rows);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-app.delete("/siswa/:id", authenticateToken, authorizeRole(["admin"]), async (req, res) => {
-  const { id } = req.params;
+app.post("/siswa", authenticateToken, authorizeRole(["admin"]), async (req, res) => {
+  const client = await pool.connect();
 
   try {
-    await pool.query("DELETE FROM users WHERE id=$1 AND role='siswa'", [id]);
+    const { nis, nama, email, password, kelas } = req.body;
+
+    if (!nis || !nama || !email || !password || !kelas) {
+      return res.status(400).json({ message: "Semua field wajib diisi" });
+    }
+
+    await client.query("BEGIN");
+
+    const existingEmail = await client.query("SELECT id FROM users WHERE LOWER(email) = LOWER($1)", [email]);
+
+    if (existingEmail.rows.length > 0) {
+      await client.query("ROLLBACK");
+      return res.status(400).json({ message: "Email sudah digunakan" });
+    }
+
+    const existingNis = await client.query("SELECT id FROM users WHERE nis = $1", [nis]);
+
+    if (existingNis.rows.length > 0) {
+      await client.query("ROLLBACK");
+      return res.status(400).json({ message: "NIS sudah digunakan" });
+    }
+
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    const result = await client.query(
+      `
+      INSERT INTO users (nis, nama, email, password, kelas, role)
+      VALUES ($1, $2, $3, $4, $5, 'siswa')
+      RETURNING id, nis, nama, email, kelas
+      `,
+      [nis, nama, email.toLowerCase(), hashedPassword, kelas]
+    );
+
+    await client.query(
+      `
+      INSERT INTO siswa (nis, nama, kelas)
+      VALUES ($1, $2, $3)
+      `,
+      [nis, nama, kelas]
+    );
+
+    await client.query("COMMIT");
+
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    await client.query("ROLLBACK");
+    console.error("CREATE SISWA ERROR:", err);
+
+    if (err.code === "23505") {
+      return res.status(400).json({ message: "Data siswa sudah ada" });
+    }
+
+    res.status(500).json({ error: err.message });
+  } finally {
+    client.release();
+  }
+});
+
+app.put("/siswa/:id", authenticateToken, authorizeRole(["admin"]), async (req, res) => {
+  const client = await pool.connect();
+
+  try {
+    const { id } = req.params;
+    const { nis, nama, email, password, kelas } = req.body;
+
+    if (!nis || !nama || !email || !kelas) {
+      return res.status(400).json({ message: "NIS, nama, email, dan kelas wajib diisi" });
+    }
+
+    await client.query("BEGIN");
+
+    const checkEmail = await client.query(
+      `
+      SELECT id
+      FROM users
+      WHERE LOWER(email) = LOWER($1)
+        AND id <> $2
+      `,
+      [email, id]
+    );
+
+    if (checkEmail.rows.length > 0) {
+      await client.query("ROLLBACK");
+      return res.status(400).json({ message: "Email sudah digunakan" });
+    }
+
+    const checkNis = await client.query(
+      `
+      SELECT id
+      FROM users
+      WHERE nis = $1
+        AND id <> $2
+      `,
+      [nis, id]
+    );
+
+    if (checkNis.rows.length > 0) {
+      await client.query("ROLLBACK");
+      return res.status(400).json({ message: "NIS sudah digunakan" });
+    }
+
+    let result;
+
+    if (password && password.trim() !== "") {
+      const hashedPassword = await bcrypt.hash(password, 10);
+
+      result = await client.query(
+        `
+        UPDATE users
+        SET nis = $1,
+            nama = $2,
+            email = $3,
+            password = $4,
+            kelas = $5
+        WHERE id = $6
+          AND role = 'siswa'
+        RETURNING id, nis, nama, email, kelas
+        `,
+        [nis, nama, email.toLowerCase(), hashedPassword, kelas, id]
+      );
+    } else {
+      result = await client.query(
+        `
+        UPDATE users
+        SET nis = $1,
+            nama = $2,
+            email = $3,
+            kelas = $4
+        WHERE id = $5
+          AND role = 'siswa'
+        RETURNING id, nis, nama, email, kelas
+        `,
+        [nis, nama, email.toLowerCase(), kelas, id]
+      );
+    }
+
+    await client.query(
+      `
+      UPDATE siswa
+      SET nis = $1,
+          nama = $2,
+          kelas = $3
+      WHERE nis = (
+        SELECT nis FROM users WHERE id = $4
+      )
+      `,
+      [nis, nama, kelas, id]
+    );
+
+    await client.query("COMMIT");
+
+    res.json(result.rows[0]);
+  } catch (err) {
+    await client.query("ROLLBACK");
+    console.error("UPDATE SISWA ERROR:", err);
+    res.status(500).json({ error: err.message });
+  } finally {
+    client.release();
+  }
+});
+
+app.delete("/siswa/:id", authenticateToken, authorizeRole(["admin"]), async (req, res) => {
+  const client = await pool.connect();
+
+  try {
+    const { id } = req.params;
+
+    await client.query("BEGIN");
+
+    const userResult = await client.query("SELECT nis FROM users WHERE id = $1 AND role = 'siswa'", [id]);
+
+    if (userResult.rows.length === 0) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ message: "Siswa tidak ditemukan" });
+    }
+
+    const nis = userResult.rows[0].nis;
+
+    await client.query("DELETE FROM siswa WHERE nis = $1", [nis]);
+    await client.query("DELETE FROM users WHERE id = $1 AND role = 'siswa'", [id]);
+
+    await client.query("COMMIT");
 
     res.json({ message: "Siswa berhasil dihapus" });
   } catch (err) {
+    await client.query("ROLLBACK");
+    console.error("DELETE SISWA ERROR:", err);
     res.status(500).json({ error: err.message });
+  } finally {
+    client.release();
   }
 });
 
 /* ================= GET PROGRESS ================= */
 
 app.get("/progress/:siswaId/:courseId", async (req, res) => {
-  const { siswaId } = req.params;
+  const { siswaId, courseId } = req.params;
 
   try {
     const result = await pool.query(
       `
       SELECT
-      COUNT(*) FILTER (WHERE ps.status='selesai') AS selesai,
-      COUNT(m.id) AS total
+        COUNT(*) FILTER (WHERE ps.status = 'selesai') AS selesai,
+        COUNT(m.id) AS total
       FROM materi m
+      JOIN modules mo ON mo.id = m.module_id
       LEFT JOIN progress_siswa ps
-      ON ps.materi_id = m.id
-      AND ps.siswa_id = $1
+        ON ps.materi_id = m.id
+       AND ps.siswa_id = $1
+      WHERE mo.course_id = $2
       `,
-      [siswaId]
+      [siswaId, courseId]
     );
 
     const selesai = Number(result.rows[0].selesai);
     const total = Number(result.rows[0].total);
-
     const progress = total === 0 ? 0 : Math.round((selesai / total) * 100);
 
-    res.json({
-      selesai,
-      total,
-      progress,
-    });
+    res.json({ selesai, total, progress });
   } catch (error) {
     console.error(error);
     res.status(500).json({ error: "Server error" });
@@ -1584,6 +1833,8 @@ app.get("/api/student/quizzes/:id", authenticateToken, authorizeRole(["siswa"]),
       parsedTypes = [];
     }
 
+    const hasSubmitted = !!quiz.submissionId;
+
     res.json({
       ...quiz,
       questionTypes: parsedTypes,
@@ -1593,6 +1844,7 @@ app.get("/api/student/quizzes/:id", authenticateToken, authorizeRole(["siswa"]),
       submissionStatus: quiz.submissionStatus || "not_started",
       submittedAt: quiz.submittedAt || null,
       totalScore: quiz.totalScore ?? null,
+      hasSubmitted,
     });
   } catch (err) {
     console.error("GET STUDENT QUIZ DETAIL ERROR:", err);
@@ -2400,7 +2652,6 @@ app.post("/api/student/projects/:projectId/group/members", authenticateToken, au
     } else {
       groupId = groupResult.rows[0].id;
     }
-
     if (isNewGroup) {
       await client.query(
         `
@@ -2628,6 +2879,7 @@ app.get("/api/student/projects/:projectId/detail", authenticateToken, authorizeR
         p.title,
         p.description,
         p.status,
+        p.deadline,
         k.nama AS class
       FROM projects p
       JOIN kelas k ON k.id = p.class_id
@@ -2648,11 +2900,14 @@ app.get("/api/student/projects/:projectId/detail", authenticateToken, authorizeR
 
     const groupResult = await pool.query(
       `
-      SELECT
+      SELECT 
         pg.id,
-        pg.group_name AS "groupName"
+        pg.group_name AS "groupName",
+        pg.created_by AS "createdBy",
+        pg.created_at AS "createdAt"
       FROM project_groups pg
-      JOIN project_group_members pgm ON pgm.group_id = pg.id
+      JOIN project_group_members pgm
+        ON pgm.group_id = pg.id
       WHERE pg.project_id = $1
         AND pgm.student_id = $2
       LIMIT 1
@@ -2671,6 +2926,30 @@ app.get("/api/student/projects/:projectId/detail", authenticateToken, authorizeR
     }
 
     const group = groupResult.rows[0];
+
+    const finalStageResult = await pool.query(
+      `
+      SELECT
+        pss.id,
+        pss.status,
+        pss.score,
+        pss.submitted_at AS "submittedAt",
+        pst.stage_no AS "stageNo",
+        psy.syntax_no AS "syntaxNo"
+      FROM project_stage_submissions pss
+      JOIN project_stages pst ON pst.id = pss.stage_id
+      JOIN project_syntaxes psy ON psy.id = pst.syntax_id
+      WHERE pss.group_id = $1
+        AND psy.project_id = $2
+        AND psy.syntax_no = 4
+        AND pst.stage_no = 4
+      ORDER BY pss.updated_at DESC NULLS LAST, pss.submitted_at DESC NULLS LAST
+      LIMIT 1
+      `,
+      [group.id, projectId]
+    );
+
+    const finalStage = finalStageResult.rows[0] || null;
 
     const membersResult = await pool.query(
       `
@@ -2823,8 +3102,11 @@ app.get("/api/student/projects/:projectId/detail", authenticateToken, authorizeR
         id: project.id,
         title: project.title,
         description: project.description,
-        status: project.status,
+        deadline: project.deadline || null,
         groupName: group.groupName,
+        status: finalStage?.status === "selesai" ? "Dinilai" : finalStage?.status === "belum_selesai" ? "Sedang Dikerjakan" : finalStage?.status === "belum_mengerjakan" ? "Belum Dikerjakan" : project.status,
+        score: finalStage?.score ?? null,
+        submittedAt: finalStage?.submittedAt ?? null,
       },
       teamMembers: membersResult.rows.map((m) => ({
         ...m,
@@ -2903,7 +3185,6 @@ app.put("/api/student/stages/:stageId/submission", authenticateToken, authorizeR
     const currentStage = stageInfoResult.rows[0];
     const currentSyntaxNo = Number(currentStage.syntaxNo);
 
-    // syntax 1 selalu boleh
     if (currentSyntaxNo > 1) {
       const prevSyntaxResult = await client.query(
         `
@@ -2963,6 +3244,40 @@ app.put("/api/student/stages/:stageId/submission", authenticateToken, authorizeR
       `,
       [stageId, groupId, answer || "", status || finalStatus]
     );
+
+    // cek apakah semua stage pada syntax saat ini sudah terisi
+    const syntaxProgress = await client.query(
+      `
+      SELECT
+        COUNT(pst.id)::int AS total_stages,
+        COUNT(
+          CASE
+            WHEN pss.status IN ('belum_selesai', 'selesai') THEN 1
+          END
+        )::int AS filled_stages
+      FROM project_stages pst
+      LEFT JOIN project_stage_submissions pss
+        ON pss.stage_id = pst.id
+       AND pss.group_id = $1
+      WHERE pst.syntax_id = $2
+      `,
+      [groupId, currentStage.syntaxId]
+    );
+
+    const totalStages = syntaxProgress.rows[0].total_stages;
+    const filledStages = syntaxProgress.rows[0].filled_stages;
+
+    if (totalStages > 0 && filledStages === totalStages) {
+      await client.query(
+        `
+        UPDATE project_syntaxes
+        SET is_locked = false
+        WHERE project_id = $1
+          AND syntax_no = $2
+        `,
+        [projectId, currentSyntaxNo + 1]
+      );
+    }
 
     await client.query("COMMIT");
     res.json(result.rows[0]);
@@ -3035,9 +3350,48 @@ app.post("/api/student/stages/:stageId/files", authenticateToken, authorizeRole(
       return res.status(403).json({ message: "Stage tidak sesuai project" });
     }
 
-    if (currentStage.isLocked) {
-      await client.query("ROLLBACK");
-      return res.status(403).json({ message: "Sintaks ini masih terkunci" });
+    if (Number(currentStage.syntaxNo) > 1) {
+      const prevSyntaxResult = await client.query(
+        `
+        SELECT id
+        FROM project_syntaxes
+        WHERE project_id = $1
+          AND syntax_no = $2
+        LIMIT 1
+        `,
+        [projectId, Number(currentStage.syntaxNo) - 1]
+      );
+
+      if (prevSyntaxResult.rows.length === 0) {
+        await client.query("ROLLBACK");
+        return res.status(400).json({ message: "Sintaks sebelumnya tidak ditemukan" });
+      }
+
+      const prevSyntaxId = prevSyntaxResult.rows[0].id;
+
+      const prevStagesResult = await client.query(
+        `
+        SELECT
+          pst.id,
+          COALESCE(pss.status, 'belum_mengerjakan') AS status
+        FROM project_stages pst
+        LEFT JOIN project_stage_submissions pss
+          ON pss.stage_id = pst.id
+         AND pss.group_id = $1
+        WHERE pst.syntax_id = $2
+        ORDER BY pst.stage_no ASC
+        `,
+        [groupId, prevSyntaxId]
+      );
+
+      const prevSyntaxFilled = prevStagesResult.rows.length > 0 && prevStagesResult.rows.every((row) => row.status === "belum_selesai" || row.status === "selesai");
+
+      if (!prevSyntaxFilled) {
+        await client.query("ROLLBACK");
+        return res.status(403).json({
+          message: "Sintaks ini masih terkunci. Selesaikan sintaks sebelumnya dulu.",
+        });
+      }
     }
 
     let submissionResult = await client.query(
@@ -3213,7 +3567,6 @@ app.get("/api/guru/projects/:projectId/monitoring", authenticateToken, authorize
   try {
     const { projectId } = req.params;
 
-    // pastikan project milik guru login
     const projectResult = await pool.query(
       `
       SELECT
@@ -3221,6 +3574,7 @@ app.get("/api/guru/projects/:projectId/monitoring", authenticateToken, authorize
         p.title,
         p.description,
         p.status,
+        p.type, 
         p.class_id AS "classId",
         k.nama AS class
       FROM projects p
@@ -3237,7 +3591,7 @@ app.get("/api/guru/projects/:projectId/monitoring", authenticateToken, authorize
 
     const project = projectResult.rows[0];
 
-    const groupsResult = await pool.query(
+    const groupResult = await pool.query(
       `
       SELECT
         pg.id,
@@ -3257,6 +3611,7 @@ app.get("/api/guru/projects/:projectId/monitoring", authenticateToken, authorize
         pss.id,
         pss.stage_id AS "stageId",
         pss.group_id AS "groupId",
+        pst.syntax_id AS "syntaxId",
         pss.answer,
         pss.status,
         pss.submitted_at AS "submittedAt",
@@ -3264,6 +3619,7 @@ app.get("/api/guru/projects/:projectId/monitoring", authenticateToken, authorize
         psf.feedback_text AS "feedbackText",
         psf.teacher_id AS "teacherId"
       FROM project_stage_submissions pss
+      JOIN project_stages pst ON pst.id = pss.stage_id
       LEFT JOIN project_stage_feedback psf
         ON psf.submission_id = pss.id
       WHERE pss.group_id IN (
@@ -3278,7 +3634,7 @@ app.get("/api/guru/projects/:projectId/monitoring", authenticateToken, authorize
       SELECT
         pgm.group_id AS "groupId",
         u.id,
-        u.nama AS name,
+        u.nama,
         u.nis,
         pgm.role AS status,
         pgm.member_role AS role
@@ -3292,16 +3648,70 @@ app.get("/api/guru/projects/:projectId/monitoring", authenticateToken, authorize
       [projectId]
     );
 
-    const groups = groupsResult.rows.map((group) => {
+    const syntaxesResult = await pool.query(
+      `
+      SELECT
+        ps.id,
+        ps.syntax_no AS "syntaxNo",
+        ps.title,
+        ps.description,
+        ps.is_locked AS "isLocked"
+      FROM project_syntaxes ps
+      WHERE ps.project_id = $1
+      ORDER BY ps.syntax_no ASC
+      `,
+      [projectId]
+    );
+
+    const stagesResult = await pool.query(
+      `
+      SELECT
+        pst.id,
+        pst.syntax_id AS "syntaxId",
+        pst.stage_no AS "stageNo",
+        pst.title,
+        pst.subtitle,
+        pst.instruction,
+        pst.allow_file_upload AS "allowFileUpload"
+      FROM project_stages pst
+      WHERE pst.syntax_id IN (
+        SELECT id FROM project_syntaxes WHERE project_id = $1
+      )
+      ORDER BY pst.syntax_id ASC, pst.stage_no ASC
+      `,
+      [projectId]
+    );
+
+    const filesResult = await pool.query(
+      `
+      SELECT
+        psf.id,
+        psf.submission_id AS "submissionId",
+        psf.file_name AS "fileName",
+        psf.file_url AS "fileUrl",
+        psf.file_size AS "fileSize"
+      FROM project_stage_files psf
+      WHERE psf.submission_id IN (
+        SELECT id
+        FROM project_stage_submissions
+        WHERE group_id IN (
+          SELECT id FROM project_groups WHERE project_id = $1
+        )
+      )
+      `,
+      [projectId]
+    );
+
+    const groups = groupResult.rows.map((group) => {
       const groupMembers = membersResult.rows
         .filter((member) => member.groupId === group.id)
         .map((member) => ({
           id: member.id,
-          name: member.name,
+          name: member.nama,
           nis: member.nis,
           status: member.status,
           role: member.role,
-          initials: member.name
+          initials: member.nama
             .split(" ")
             .map((x) => x[0])
             .join("")
@@ -3433,6 +3843,1348 @@ app.put("/api/guru/submissions/:submissionId/status", authenticateToken, authori
   } catch (err) {
     console.error("UPDATE SUBMISSION STATUS ERROR:", err);
     res.status(500).json({ error: err.message });
+  }
+});
+
+app.put("/api/student/projects/:projectId/group/name", authenticateToken, authorizeRole(["siswa"]), async (req, res) => {
+  try {
+    const { projectId } = req.params;
+    const { groupName } = req.body;
+
+    if (!groupName || !groupName.trim()) {
+      return res.status(400).json({ message: "Nama kelompok wajib diisi" });
+    }
+
+    const groupResult = await pool.query(
+      `
+      SELECT pg.id
+      FROM project_groups pg
+      JOIN project_group_members pgm ON pgm.group_id = pg.id
+      WHERE pg.project_id = $1
+        AND pgm.student_id = $2
+      LIMIT 1
+      `,
+      [projectId, req.user.id]
+    );
+
+    if (groupResult.rows.length === 0) {
+      return res.status(404).json({ message: "Kelompok tidak ditemukan" });
+    }
+
+    const groupId = groupResult.rows[0].id;
+
+    const result = await pool.query(
+      `
+      UPDATE project_groups
+      SET group_name = $1
+      WHERE id = $2
+      RETURNING
+        id,
+        project_id AS "projectId",
+        group_name AS "groupName",
+        created_by AS "createdBy",
+        created_at AS "createdAt"
+      `,
+      [groupName.trim(), groupId]
+    );
+
+    res.json({
+      message: "Nama kelompok berhasil disimpan",
+      group: result.rows[0],
+    });
+  } catch (err) {
+    console.error("UPDATE GROUP NAME ERROR:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.put("/api/guru/groups/:groupId/name", authenticateToken, authorizeRole(["guru"]), async (req, res) => {
+  try {
+    const { groupId } = req.params;
+    const { groupName } = req.body;
+
+    if (!groupName || !groupName.trim()) {
+      return res.status(400).json({ message: "Nama kelompok wajib diisi" });
+    }
+
+    const checkResult = await pool.query(
+      `
+      SELECT
+        pg.id
+      FROM project_groups pg
+      JOIN projects p ON p.id = pg.project_id
+      WHERE pg.id = $1
+        AND p.created_by = $2
+      `,
+      [groupId, req.user.id]
+    );
+
+    if (checkResult.rows.length === 0) {
+      return res.status(404).json({ message: "Kelompok tidak ditemukan atau bukan milik guru ini" });
+    }
+
+    const result = await pool.query(
+      `
+      UPDATE project_groups
+      SET group_name = $1
+      WHERE id = $2
+      RETURNING
+        id,
+        project_id AS "projectId",
+        group_name AS "groupName",
+        created_by AS "createdBy",
+        created_at AS "createdAt"
+      `,
+      [groupName.trim(), groupId]
+    );
+
+    res.json({
+      message: "Nama kelompok berhasil disimpan",
+      group: result.rows[0],
+    });
+  } catch (err) {
+    console.error("UPDATE GROUP NAME BY GURU ERROR:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+//Route siswa upload final submission project
+app.post("/api/student/projects/:projectId/final-submit", authenticateToken, authorizeRole(["siswa"]), upload.single("file"), async (req, res) => {
+  const client = await pool.connect();
+
+  try {
+    const { projectId } = req.params;
+
+    if (!req.file) {
+      return res.status(400).json({ message: "File wajib diupload" });
+    }
+
+    await client.query("BEGIN");
+
+    const projectResult = await client.query(
+      `
+        SELECT
+          p.id,
+          p.type,
+          p.deadline,
+          k.nama AS class
+        FROM projects p
+        JOIN kelas k ON k.id = p.class_id
+        WHERE p.id = $1
+        `,
+      [projectId]
+    );
+
+    if (projectResult.rows.length === 0) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ message: "Project tidak ditemukan" });
+    }
+
+    const project = projectResult.rows[0];
+
+    const siswaResult = await client.query(
+      `
+        SELECT id, nama, kelas
+        FROM users
+        WHERE id = $1 AND role = 'siswa'
+        `,
+      [req.user.id]
+    );
+
+    if (siswaResult.rows.length === 0) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ message: "Siswa tidak ditemukan" });
+    }
+
+    const siswa = siswaResult.rows[0];
+
+    if (siswa.kelas !== project.class) {
+      await client.query("ROLLBACK");
+      return res.status(403).json({ message: "Project ini bukan untuk kelas kamu" });
+    }
+
+    let studentId = null;
+    let groupId = null;
+
+    if (project.type === "group") {
+      const groupResult = await client.query(
+        `
+          SELECT pg.id
+          FROM project_groups pg
+          JOIN project_group_members pgm ON pgm.group_id = pg.id
+          WHERE pg.project_id = $1
+            AND pgm.student_id = $2
+          LIMIT 1
+          `,
+        [projectId, req.user.id]
+      );
+
+      if (groupResult.rows.length === 0) {
+        await client.query("ROLLBACK");
+        return res.status(400).json({ message: "Kamu belum punya kelompok untuk project ini" });
+      }
+
+      groupId = groupResult.rows[0].id;
+    } else {
+      studentId = req.user.id;
+    }
+
+    const existingResult = await client.query(
+      `
+        SELECT id
+        FROM project_final_submissions
+        WHERE project_id = $1
+          AND (
+            (student_id = $2 AND $2 IS NOT NULL)
+            OR
+            (group_id = $3 AND $3 IS NOT NULL)
+          )
+        LIMIT 1
+        `,
+      [projectId, studentId, groupId]
+    );
+
+    let result;
+
+    const status = new Date() > new Date(project.deadline) ? "late" : "pending";
+
+    if (existingResult.rows.length > 0) {
+      result = await client.query(
+        `
+          UPDATE project_final_submissions
+          SET file_name = $1,
+              file_url = $2,
+              file_size = $3,
+              submitted_at = NOW(),
+              status = $4,
+              updated_at = NOW()
+          WHERE id = $5
+          RETURNING *
+          `,
+        [req.file.originalname, req.file.filename, req.file.size, status, existingResult.rows[0].id]
+      );
+    } else {
+      result = await client.query(
+        `
+          INSERT INTO project_final_submissions
+          (project_id, student_id, group_id, submitted_at, file_name, file_url, file_size, status)
+          VALUES ($1,$2,$3,NOW(),$4,$5,$6,$7)
+          RETURNING *
+          `,
+        [projectId, studentId, groupId, req.file.originalname, req.file.filename, req.file.size, status]
+      );
+    }
+
+    await client.query("COMMIT");
+
+    res.status(201).json({
+      message: "Final submission berhasil dikirim",
+      submission: result.rows[0],
+    });
+  } catch (err) {
+    await client.query("ROLLBACK");
+    console.error("FINAL SUBMIT ERROR:", err);
+    res.status(500).json({ error: err.message });
+  } finally {
+    client.release();
+  }
+});
+
+//Route guru bikin rubrik penilaian project
+app.post("/api/guru/projects/:projectId/rubrics", authenticateToken, authorizeRole(["guru"]), async (req, res) => {
+  const client = await pool.connect();
+
+  try {
+    const { projectId } = req.params;
+    const { rubrics } = req.body;
+
+    if (!Array.isArray(rubrics) || rubrics.length === 0) {
+      return res.status(400).json({ message: "Rubrik wajib diisi" });
+    }
+
+    await client.query("BEGIN");
+
+    const projectCheck = await client.query(
+      `
+      SELECT id
+      FROM projects
+      WHERE id = $1 AND created_by = $2
+      `,
+      [projectId, req.user.id]
+    );
+
+    if (projectCheck.rows.length === 0) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ message: "Project tidak ditemukan" });
+    }
+
+    await client.query("DELETE FROM project_assessment_rubrics WHERE project_id = $1", [projectId]);
+
+    for (let i = 0; i < rubrics.length; i++) {
+      const rubric = rubrics[i];
+
+      await client.query(
+        `
+        INSERT INTO project_assessment_rubrics (project_id, name, weight, sort_order)
+        VALUES ($1, $2, $3, $4)
+        `,
+        [projectId, rubric.name, rubric.weight, i + 1]
+      );
+    }
+
+    await client.query("COMMIT");
+
+    res.json({ message: "Rubrik berhasil disimpan" });
+  } catch (err) {
+    await client.query("ROLLBACK");
+    console.error("SAVE PROJECT RUBRICS ERROR:", err);
+    res.status(500).json({ error: err.message });
+  } finally {
+    client.release();
+  }
+});
+
+//Route summary dashboard penilaian guru
+app.get("/api/guru/projects/:projectId/review-summary", authenticateToken, authorizeRole(["guru"]), async (req, res) => {
+  try {
+    const { projectId } = req.params;
+
+    const projectCheck = await pool.query(
+      `
+      SELECT id, deadline
+      FROM projects
+      WHERE id = $1 AND created_by = $2
+      `,
+      [projectId, req.user.id]
+    );
+
+    if (projectCheck.rows.length === 0) {
+      return res.status(404).json({ message: "Project tidak ditemukan" });
+    }
+
+    const result = await pool.query(
+      `
+      WITH final_rows AS (
+        SELECT
+          pfs.id,
+          pfs.status,
+          pfs.final_score
+        FROM project_final_submissions pfs
+        WHERE pfs.project_id = $1
+      ),
+      stage_rows AS (
+        SELECT
+          pss.id,
+          CASE
+            WHEN pss.status = 'selesai' THEN 'graded'
+            WHEN pss.submitted_at > p.deadline THEN 'late'
+            ELSE 'pending'
+          END AS status,
+          pss.score AS final_score
+        FROM project_stage_submissions pss
+        JOIN project_stages pst ON pst.id = pss.stage_id
+        JOIN project_syntaxes psy ON psy.id = pst.syntax_id
+        JOIN projects p ON p.id = psy.project_id
+        LEFT JOIN LATERAL (
+          SELECT file_url
+          FROM project_stage_files
+          WHERE submission_id = pss.id
+          ORDER BY id DESC
+          LIMIT 1
+        ) psf ON true
+        WHERE p.id = $1
+          AND psy.syntax_no = 4
+          AND pst.stage_no = 4
+          AND psf.file_url IS NOT NULL
+      ),
+      source_rows AS (
+        SELECT * FROM final_rows
+        UNION ALL
+        SELECT * FROM stage_rows
+        WHERE NOT EXISTS (SELECT 1 FROM final_rows)
+      )
+      SELECT
+        COUNT(*) FILTER (WHERE status = 'pending')::int AS pending,
+        COUNT(*) FILTER (WHERE status = 'graded')::int AS graded,
+        COUNT(*) FILTER (WHERE status = 'late')::int AS late,
+        COALESCE(ROUND(AVG(final_score)::numeric, 1), 0) AS "averageScore"
+      FROM source_rows
+      `,
+      [projectId]
+    );
+
+    res.json({
+      ...result.rows[0],
+      deadline: projectCheck.rows[0].deadline,
+    });
+  } catch (err) {
+    console.error("GET REVIEW SUMMARY ERROR FULL:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+//Route daftar submission untuk panel kiri
+app.get("/api/guru/projects/:projectId/review-submissions", authenticateToken, authorizeRole(["guru"]), async (req, res) => {
+  try {
+    const { projectId } = req.params;
+    const { status: statusQuery = "pending" } = req.query;
+
+    console.log("=== REVIEW SUBMISSIONS HIT ===");
+    console.log("projectId:", projectId);
+    console.log("userId:", req.user.id);
+    console.log("status:", statusQuery);
+
+    if (!projectId || projectId === "undefined") {
+      return res.status(400).json({ message: "projectId tidak valid" });
+    }
+
+    const projectCheck = await pool.query(
+      `
+      SELECT id, deadline, created_by, title, class_id
+      FROM projects
+      WHERE id = $1
+      `,
+      [projectId]
+    );
+
+    console.log("PROJECT CHECK:", projectCheck.rows);
+
+    if (projectCheck.rows.length === 0) {
+      return res.status(404).json({ message: "Project tidak ditemukan" });
+    }
+
+    const rowsResult = await pool.query(
+      `
+      SELECT
+        pss.id,
+        p.id AS "projectId",
+        p.title AS "projectTitle",
+        p.deadline AS deadline,
+        pg.id AS "groupId",
+        COALESCE(pg.group_name, 'Kelompok') AS title,
+        COALESCE(k.nama, '-') AS subtitle,
+        pss.submitted_at AS "submittedAt",
+        CASE
+          WHEN pss.status = 'selesai' THEN 'graded'
+          WHEN pss.submitted_at > p.deadline THEN 'late'
+          ELSE 'pending'
+        END AS status,
+        pss.score AS "finalScore",
+        psf.file_name AS "fileName",
+        psf.file_url AS "fileUrl",
+        psf.file_size AS "fileSize",
+        pst.stage_no AS "stageNo",
+        psy.syntax_no AS "syntaxNo"
+      FROM project_stage_files psf
+      JOIN project_stage_submissions pss ON pss.id = psf.submission_id
+      JOIN project_stages pst ON pst.id = pss.stage_id
+      JOIN project_syntaxes psy ON psy.id = pst.syntax_id
+      JOIN projects p ON p.id = psy.project_id
+      LEFT JOIN project_groups pg ON pg.id = pss.group_id
+      LEFT JOIN kelas k ON k.id = p.class_id
+      WHERE p.id = $1
+        AND psy.syntax_no = 4
+        AND pst.stage_no = 4
+      ORDER BY pss.submitted_at DESC
+      `,
+      [projectId]
+    );
+
+    let rows = rowsResult.rows;
+
+    console.log("RAW ROWS:", rows);
+
+    if (statusQuery === "pending") {
+      rows = rows.filter((r) => r.status === "pending" || r.status === "late");
+    } else if (statusQuery === "graded") {
+      rows = rows.filter((r) => r.status === "graded");
+    }
+
+    console.log("FILTERED ROWS:", rows);
+
+    return res.json(
+      rows.map((row) => ({
+        ...row,
+        fileSizeLabel: formatFileSize(row.fileSize),
+      }))
+    );
+  } catch (err) {
+    console.error("GET REVIEW SUBMISSIONS ERROR FULL:", err);
+    console.error("MESSAGE:", err.message);
+    console.error("STACK:", err.stack);
+    return res.status(500).json({
+      error: err.message,
+      detail: String(err),
+    });
+  }
+});
+
+//Route detail submission untuk panel kanan
+app.get("/api/guru/project-submissions/:submissionId", authenticateToken, authorizeRole(["guru"]), async (req, res) => {
+  try {
+    const { submissionId } = req.params;
+
+    console.log("DETAIL submissionId:", submissionId);
+
+    const submissionResult = await pool.query(
+      `
+      SELECT
+        pss.id,
+        p.id AS "projectId",
+        p.title AS "projectTitle",
+        p.deadline AS deadline,
+        k.nama AS "className",
+        pg.id AS "groupId",
+        pg.group_name AS "groupName",
+        pss.submitted_at AS "submittedAt",
+        CASE
+          WHEN pss.status = 'selesai' THEN 'graded'
+          WHEN pss.submitted_at > p.deadline THEN 'late'
+          ELSE 'pending'
+        END AS status,
+        fb.feedback_text AS "teacherNote",
+        pss.score AS "finalScore",
+        psf.file_name AS "fileName",
+        psf.file_url AS "fileUrl",
+        psf.file_size AS "fileSize"
+      FROM project_stage_submissions pss
+      JOIN project_stages pst ON pst.id = pss.stage_id
+      JOIN project_syntaxes psy ON psy.id = pst.syntax_id
+      JOIN projects p ON p.id = psy.project_id
+      JOIN kelas k ON k.id = p.class_id
+      JOIN project_groups pg ON pg.id = pss.group_id
+      LEFT JOIN project_stage_feedback fb ON fb.submission_id = pss.id
+      LEFT JOIN LATERAL (
+        SELECT file_name, file_url, file_size
+        FROM project_stage_files
+        WHERE submission_id = pss.id
+        ORDER BY id DESC
+        LIMIT 1
+      ) psf ON true
+      WHERE pss.id = $1
+        AND psy.syntax_no = 4
+        AND pst.stage_no = 4
+      `,
+      [submissionId]
+    );
+
+    if (submissionResult.rows.length === 0) {
+      return res.status(404).json({ message: "Submission tidak ditemukan" });
+    }
+
+    const submission = submissionResult.rows[0];
+
+    const rubricResult = await pool.query(
+      `
+      SELECT
+        par.id,
+        par.name,
+        par.weight,
+        psrs.score,
+        psrs.note
+      FROM project_assessment_rubrics par
+      LEFT JOIN project_submission_rubric_scores psrs
+        ON psrs.rubric_id = par.id
+       AND psrs.submission_id = $1
+      WHERE par.project_id = $2
+      ORDER BY par.sort_order ASC
+      `,
+      [submissionId, submission.projectId]
+    );
+
+    const membersResult = await pool.query(
+      `
+      SELECT
+        u.id,
+        u.nama,
+        u.kelas,
+        u.nis
+      FROM project_group_members pgm
+      JOIN users u ON u.id = pgm.student_id
+      WHERE pgm.group_id = $1
+      ORDER BY u.nama ASC
+      `,
+      [submission.groupId]
+    );
+
+    res.json({
+      id: submission.id,
+      projectId: submission.projectId,
+      projectTitle: submission.projectTitle,
+      deadline: submission.deadline,
+      submittedAt: submission.submittedAt,
+      status: submission.status,
+      fileName: submission.fileName,
+      fileUrl: submission.fileUrl,
+      fileSize: submission.fileSize,
+      fileSizeLabel: formatFileSize(submission.fileSize),
+      teacherNote: submission.teacherNote,
+      finalScore: submission.finalScore,
+      student: null,
+      group: {
+        id: submission.groupId,
+        groupName: submission.groupName,
+        className: submission.className,
+        members: membersResult.rows,
+      },
+      rubrics: rubricResult.rows,
+    });
+  } catch (err) {
+    console.error("GET PROJECT SUBMISSION DETAIL ERROR:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+//Route simpan nilai rubrik
+app.put("/api/guru/project-submissions/:submissionId/grade", authenticateToken, authorizeRole(["guru"]), async (req, res) => {
+  const client = await pool.connect();
+
+  try {
+    const { submissionId } = req.params;
+    const { teacherNote, rubrics } = req.body;
+
+    console.log("SAVE submissionId:", submissionId);
+    console.log("BODY rubrics:", rubrics);
+    console.log("BODY teacherNote:", teacherNote);
+
+    if (!Array.isArray(rubrics) || rubrics.length === 0) {
+      return res.status(400).json({ message: "Rubrik penilaian wajib diisi" });
+    }
+
+    await client.query("BEGIN");
+
+    const submissionCheck = await client.query(
+      `
+      SELECT
+        pss.id,
+        pss.status,
+        p.id AS "projectId"
+      FROM project_stage_submissions pss
+      JOIN project_stages pst ON pst.id = pss.stage_id
+      JOIN project_syntaxes psy ON psy.id = pst.syntax_id
+      JOIN projects p ON p.id = psy.project_id
+      WHERE pss.id = $1
+        AND p.created_by = $2
+        AND psy.syntax_no = 4
+        AND pst.stage_no = 4
+      `,
+      [submissionId, req.user.id]
+    );
+
+    if (submissionCheck.rows.length === 0) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ message: "Submission tidak ditemukan" });
+    }
+
+    const submission = submissionCheck.rows[0];
+
+    if (submission.status === "selesai") {
+      await client.query("ROLLBACK");
+      return res.status(400).json({
+        message: "Submission ini sudah dinilai dan tidak dapat diubah lagi",
+      });
+    }
+
+    const rubricMasterResult = await client.query(
+      `
+      SELECT id, weight
+      FROM project_assessment_rubrics
+      WHERE project_id = $1
+      ORDER BY sort_order ASC
+      `,
+      [submission.projectId]
+    );
+
+    let rubricRows = rubricMasterResult.rows;
+
+    if (rubricRows.length === 0) {
+      const defaults = [
+        { name: "Kreativitas & Inovasi", weight: 30, sort_order: 1 },
+        { name: "Pemahaman Konsep", weight: 40, sort_order: 2 },
+        { name: "Kerja Sama Tim", weight: 20, sort_order: 3 },
+        { name: "Dokumentasi", weight: 10, sort_order: 4 },
+      ];
+
+      for (const item of defaults) {
+        await client.query(
+          `
+          INSERT INTO project_assessment_rubrics (project_id, name, weight, sort_order)
+          VALUES ($1, $2, $3, $4)
+          `,
+          [submission.projectId, item.name, item.weight, item.sort_order]
+        );
+      }
+
+      const refetchRubrics = await client.query(
+        `
+        SELECT id, weight
+        FROM project_assessment_rubrics
+        WHERE project_id = $1
+        ORDER BY sort_order ASC
+        `,
+        [submission.projectId]
+      );
+
+      rubricRows = refetchRubrics.rows;
+    }
+
+    const rubricMap = new Map(rubricRows.map((r) => [Number(r.id), Number(r.weight)]));
+    const normalizedRubrics = [];
+
+    for (let i = 0; i < rubrics.length; i++) {
+      const item = rubrics[i];
+      let rubricId = Number(item.rubricId);
+
+      if (!rubricMap.has(rubricId) && rubricRows[i]) {
+        rubricId = Number(rubricRows[i].id);
+      }
+
+      if (!rubricMap.has(rubricId)) {
+        await client.query("ROLLBACK");
+        return res.status(400).json({ message: `Rubrik ${item.rubricId} tidak valid` });
+      }
+
+      normalizedRubrics.push({
+        rubricId,
+        weight: rubricMap.get(rubricId),
+        score: Number(item.score || 0),
+        note: item.note || null,
+      });
+    }
+
+    console.log("NORMALIZED RUBRICS:", normalizedRubrics);
+
+    for (const item of normalizedRubrics) {
+      await client.query(
+        `
+        INSERT INTO project_submission_rubric_scores
+          (submission_id, rubric_id, score, note, created_at, updated_at)
+        VALUES ($1, $2, $3, $4, NOW(), NOW())
+        ON CONFLICT (submission_id, rubric_id)
+        DO UPDATE SET
+          score = EXCLUDED.score,
+          note = EXCLUDED.note,
+          updated_at = NOW()
+        `,
+        [submissionId, item.rubricId, item.score, item.note]
+      );
+    }
+
+    const finalScore = normalizedRubrics.reduce((total, item) => {
+      return total + (item.score * item.weight) / 100;
+    }, 0);
+
+    await client.query(
+      `
+      INSERT INTO project_stage_feedback (submission_id, teacher_id, feedback_text, created_at, updated_at)
+      VALUES ($1, $2, $3, NOW(), NOW())
+      ON CONFLICT (submission_id)
+      DO UPDATE SET
+        teacher_id = EXCLUDED.teacher_id,
+        feedback_text = EXCLUDED.feedback_text,
+        updated_at = NOW()
+      `,
+      [submissionId, req.user.id, teacherNote || null]
+    );
+
+    await client.query(
+      `
+      UPDATE project_stage_submissions
+      SET status = 'selesai',
+          score = $1,
+          updated_at = NOW()
+      WHERE id = $2
+      `,
+      [Number(finalScore.toFixed(2)), submissionId]
+    );
+
+    await client.query("COMMIT");
+
+    res.json({
+      message: "Penilaian berhasil disimpan",
+      finalScore: Number(finalScore.toFixed(2)),
+    });
+  } catch (err) {
+    await client.query("ROLLBACK");
+    console.error("GRADE PROJECT SUBMISSION ERROR:", err);
+    res.status(500).json({ error: err.message });
+  } finally {
+    client.release();
+  }
+});
+
+/* ================= NILAI SISWA ================= */
+
+function toLetterGrade(score) {
+  const n = Number(score || 0);
+
+  if (n >= 90) return "A";
+  if (n >= 85) return "A-";
+  if (n >= 80) return "B+";
+  if (n >= 75) return "B";
+  if (n >= 70) return "C+";
+  if (n >= 65) return "C";
+  return "D";
+}
+
+function monthLabelFromDate(dateValue) {
+  const date = new Date(dateValue);
+
+  if (Number.isNaN(date.getTime())) return null;
+
+  return date.toLocaleString("id-ID", { month: "short" });
+}
+
+app.get("/api/student/grades/overview", authenticateToken, authorizeRole(["siswa"]), async (req, res) => {
+  try {
+    const siswaId = req.user.id;
+
+    const userResult = await pool.query(
+      `
+      SELECT id, nama, kelas, nis
+      FROM users
+      WHERE id = $1 AND role = 'siswa'
+      `,
+      [siswaId]
+    );
+
+    if (userResult.rows.length === 0) {
+      return res.status(404).json({ message: "Siswa tidak ditemukan" });
+    }
+
+    const siswa = userResult.rows[0];
+
+    const quizResult = await pool.query(
+      `
+      SELECT
+        qs.id AS submission_id,
+        q.id AS quiz_id,
+        q.title,
+        q.description,
+        q.created_at,
+        qs.submitted_at,
+        qs.status,
+        COALESCE(qs.total_score, 0) AS total_score,
+        guru.nama AS teacher_name
+      FROM quiz_submissions qs
+      JOIN quizzes q
+        ON q.id = qs.quiz_id
+      LEFT JOIN users guru
+        ON guru.id = q.created_by
+      WHERE qs.student_id = $1
+      ORDER BY qs.submitted_at DESC NULLS LAST, q.created_at DESC
+      `,
+      [siswaId]
+    );
+
+    const quizGrades = quizResult.rows.map((row, index) => ({
+      id: row.submission_id || `quiz-${index + 1}`,
+      title: row.title,
+      score: Number(row.total_score || 0),
+      date: row.submitted_at || row.created_at,
+      category: "Quiz",
+      teacher: row.teacher_name || "-",
+      status: row.status || "submitted",
+    }));
+
+    const projectResult = await pool.query(
+      `
+      SELECT
+        pss.id AS submission_id,
+        p.id AS project_id,
+        p.title,
+        p.description,
+        p.type,
+        p.created_at,
+        pss.submitted_at,
+        pss.status,
+        COALESCE(pss.score, 0) AS final_score,
+        psf.feedback_text AS teacher_note,
+        guru.nama AS teacher_name
+      FROM project_stage_submissions pss
+      JOIN project_stages pst
+        ON pst.id = pss.stage_id
+      JOIN project_syntaxes psy
+        ON psy.id = pst.syntax_id
+      JOIN projects p
+        ON p.id = psy.project_id
+      LEFT JOIN project_stage_feedback psf
+        ON psf.submission_id = pss.id
+      LEFT JOIN users guru
+        ON guru.id = p.created_by
+      WHERE psy.syntax_no = 4
+        AND pst.stage_no = 4
+        AND pss.group_id IN (
+          SELECT pgm.group_id
+          FROM project_group_members pgm
+          WHERE pgm.student_id = $1
+        )
+        AND pss.score IS NOT NULL
+      ORDER BY pss.submitted_at DESC NULLS LAST, p.created_at DESC
+      `,
+      [siswaId]
+    );
+
+    const pblGrades = projectResult.rows.map((row, index) => ({
+      id: row.submission_id || `pbl-${index + 1}`,
+      project: row.title,
+      fase: row.type === "group" ? "Project Kelompok" : "Project Individu",
+      score: Number(row.final_score || 0),
+      feedback: row.teacher_note || "Belum ada feedback",
+      teacher: row.teacher_name || "-",
+      date: row.submitted_at || row.created_at,
+      status: row.status || "graded",
+    }));
+
+    const courseGrades = [
+      ...quizGrades.map((item, index) => ({
+        id: `quiz-course-${index + 1}`,
+        course: item.title,
+        teacher: item.teacher || "-",
+        grade: toLetterGrade(item.score),
+        score: item.score,
+        status: item.status === "graded" || item.status === "submitted" ? "Selesai" : "Diproses",
+        date: item.date,
+      })),
+      ...pblGrades.map((item, index) => ({
+        id: `pbl-course-${index + 1}`,
+        course: item.project,
+        teacher: item.teacher || "-",
+        grade: toLetterGrade(item.score),
+        score: item.score,
+        status: item.status === "graded" ? "Selesai" : "Diproses",
+        date: item.date,
+      })),
+    ];
+
+    const quizScores = quizGrades.map((item) => Number(item.score || 0));
+    const projectScores = pblGrades.map((item) => Number(item.score || 0));
+    const allScores = [...quizScores, ...projectScores];
+
+    const averageScore = allScores.length > 0 ? Number((allScores.reduce((sum, n) => sum + n, 0) / allScores.length).toFixed(1)) : 0;
+
+    const averageQuiz = quizScores.length > 0 ? Number((quizScores.reduce((sum, n) => sum + n, 0) / quizScores.length).toFixed(1)) : 0;
+
+    const averageProject = projectScores.length > 0 ? Number((projectScores.reduce((sum, n) => sum + n, 0) / projectScores.length).toFixed(1)) : 0;
+
+    let ranking = "-";
+    if (averageScore >= 90) ranking = "Top 5%";
+    else if (averageScore >= 85) ranking = "Top 10%";
+    else if (averageScore >= 80) ranking = "Top 20%";
+    else ranking = "Top 50%";
+
+    const monthlyMap = new Map();
+
+    [...quizGrades, ...pblGrades].forEach((item) => {
+      const month = monthLabelFromDate(item.date);
+      if (!month) return;
+
+      if (!monthlyMap.has(month)) {
+        monthlyMap.set(month, []);
+      }
+
+      monthlyMap.get(month).push(Number(item.score || 0));
+    });
+
+    const monthOrder = ["Jan", "Feb", "Mar", "Apr", "Mei", "Jun", "Jul", "Agu", "Sep", "Okt", "Nov", "Des"];
+
+    const gradeHistory = Array.from(monthlyMap.entries())
+      .map(([month, scores]) => ({
+        month,
+        grade: Number((scores.reduce((sum, n) => sum + n, 0) / scores.length).toFixed(1)),
+      }))
+      .sort((a, b) => monthOrder.indexOf(a.month) - monthOrder.indexOf(b.month));
+
+    const weightageData = [
+      { name: "Kuis", value: 30, color: "#3b82f6" },
+      { name: "Proyek PBL", value: 40, color: "#8b5cf6" },
+      { name: "Ujian Akhir", value: 30, color: "#10b981" },
+    ];
+
+    res.json({
+      student: {
+        id: siswa.id,
+        nama: siswa.nama,
+        kelas: siswa.kelas,
+        nis: siswa.nis,
+      },
+      summary: {
+        averageScore,
+        averageQuiz,
+        averageProject,
+        ranking,
+        targetSemester: 95.0,
+      },
+      gradeHistory,
+      weightageData,
+      quizGrades,
+      courseGrades,
+      pblGrades,
+    });
+  } catch (err) {
+    console.error("GET STUDENT GRADES OVERVIEW ERROR:", err);
+    res.status(500).json({
+      message: "Gagal mengambil data nilai siswa",
+      error: err.message,
+    });
+  }
+});
+
+app.get("/api/guru/students/:studentId/grades-detail", authenticateToken, authorizeRole(["guru"]), async (req, res) => {
+  try {
+    const { studentId } = req.params;
+    const teacherId = req.user.id;
+
+    // 1. Ambil data siswa
+    const studentResult = await pool.query(
+      `
+      SELECT
+        id::text,
+        nama AS "studentName",
+        kelas AS "studentClass",
+        nis AS "studentNumber"
+      FROM users
+      WHERE id = $1
+        AND role = 'siswa'
+      `,
+      [studentId]
+    );
+
+    if (studentResult.rows.length === 0) {
+      return res.status(404).json({ message: "Siswa tidak ditemukan" });
+    }
+
+    const student = studentResult.rows[0];
+
+    // 2. Ambil nilai quiz siswa yang dibuat guru ini
+    const quizResult = await pool.query(
+      `
+      SELECT
+        qs.id::text AS id,
+        q.title AS "quizTitle",
+        COALESCE(qs.total_score, 0)::float AS score,
+        100::float AS "maxScore",
+        TO_CHAR(COALESCE(qs.submitted_at, q.created_at), 'DD Mon YYYY') AS date,
+        CASE
+          WHEN qs.id IS NOT NULL THEN 'completed'
+          ELSE 'pending'
+        END AS status
+      FROM quizzes q
+      LEFT JOIN quiz_submissions qs
+        ON qs.quiz_id = q.id
+       AND qs.student_id = $1
+      WHERE q.created_by = $2
+      ORDER BY COALESCE(qs.submitted_at, q.created_at) DESC
+      `,
+      [studentId, teacherId]
+    );
+
+    // 3. Ambil nilai project siswa untuk project milik guru ini
+    // pakai syntax 4 stage 4 sebagai final score project, sesuai backend kamu
+    const projectResult = await pool.query(
+      `
+      SELECT
+        pss.id::text AS "submissionId",
+        p.id::text AS id,
+        p.title AS "projectTitle",
+        COALESCE(pss.score, 0)::float AS score,
+        100::float AS "maxScore",
+        TO_CHAR(COALESCE(pss.submitted_at, p.created_at), 'DD Mon YYYY') AS date
+      FROM project_stage_submissions pss
+      JOIN project_stages pst
+        ON pst.id = pss.stage_id
+      JOIN project_syntaxes psy
+        ON psy.id = pst.syntax_id
+      JOIN projects p
+        ON p.id = psy.project_id
+      JOIN project_group_members pgm
+        ON pgm.group_id = pss.group_id
+      WHERE pgm.student_id = $1
+        AND p.created_by = $2
+        AND psy.syntax_no = 4
+        AND pst.stage_no = 4
+        AND pss.score IS NOT NULL
+      ORDER BY COALESCE(pss.submitted_at, p.created_at) DESC
+      `,
+      [studentId, teacherId]
+    );
+
+    // 4. Ambil detail rubric sebagai phases project
+    const projectScores = await Promise.all(
+      projectResult.rows.map(async (project) => {
+        const rubricResult = await pool.query(
+          `
+          SELECT
+            par.name,
+            COALESCE(psrs.score, 0)::float AS score,
+            100::float AS "maxScore"
+          FROM project_assessment_rubrics par
+          LEFT JOIN project_submission_rubric_scores psrs
+            ON psrs.rubric_id = par.id
+           AND psrs.submission_id = $1
+          WHERE par.project_id = $2
+          ORDER BY par.sort_order ASC
+          `,
+          [project.submissionId, project.id]
+        );
+
+        return {
+          id: project.id,
+          projectTitle: project.projectTitle,
+          score: project.score,
+          maxScore: project.maxScore,
+          date: project.date,
+          phases: rubricResult.rows,
+        };
+      })
+    );
+
+    return res.json({
+      id: student.id,
+      studentName: student.studentName,
+      studentClass: student.studentClass,
+      studentNumber: student.studentNumber,
+      quizScores: quizResult.rows,
+      projectScores,
+    });
+  } catch (err) {
+    console.error("GET STUDENT GRADE DETAIL ERROR:", err);
+    res.status(500).json({
+      message: "Gagal mengambil detail nilai siswa",
+      error: err.message,
+    });
+  }
+});
+
+app.get("/api/guru/students/grade-summary", authenticateToken, authorizeRole(["guru"]), async (req, res) => {
+  try {
+    const teacherId = req.user.id;
+    const { kelas } = req.query;
+
+    const result = await pool.query(
+      `
+      WITH teacher_quizzes AS (
+        SELECT
+          qs.student_id,
+          AVG(COALESCE(qs.total_score, 0))::numeric(10,2) AS avg_quiz,
+          COUNT(qs.id)::int AS quiz_count
+        FROM quiz_submissions qs
+        JOIN quizzes q
+          ON q.id = qs.quiz_id
+        WHERE q.created_by = $1
+        GROUP BY qs.student_id
+      ),
+      teacher_projects AS (
+        SELECT
+          pgm.student_id,
+          AVG(COALESCE(pss.score, 0))::numeric(10,2) AS avg_project,
+          COUNT(DISTINCT p.id)::int AS project_count
+        FROM project_stage_submissions pss
+        JOIN project_stages pst
+          ON pst.id = pss.stage_id
+        JOIN project_syntaxes psy
+          ON psy.id = pst.syntax_id
+        JOIN projects p
+          ON p.id = psy.project_id
+        JOIN project_group_members pgm
+          ON pgm.group_id = pss.group_id
+        WHERE p.created_by = $1
+          AND psy.syntax_no = 4
+          AND pst.stage_no = 4
+          AND pss.score IS NOT NULL
+        GROUP BY pgm.student_id
+      ),
+      teacher_students AS (
+        SELECT
+          u.id,
+          u.nama,
+          u.nis,
+          u.kelas
+        FROM users u
+        LEFT JOIN teacher_quizzes tq
+          ON tq.student_id = u.id
+        LEFT JOIN teacher_projects tp
+          ON tp.student_id = u.id
+        WHERE u.role = 'siswa'
+          AND (tq.student_id IS NOT NULL OR tp.student_id IS NOT NULL)
+          AND ($2::text IS NULL OR u.kelas = $2)
+      )
+      SELECT
+        ts.id,
+        ts.nama AS name,
+        ts.nis,
+        ts.kelas AS class,
+        COALESCE(tq.avg_quiz, 0)::float AS "quizAvg",
+        COALESCE(tp.avg_project, 0)::float AS "projectAvg",
+        ROUND(
+          (
+            COALESCE(tq.avg_quiz, 0) * 0.4 +
+            COALESCE(tp.avg_project, 0) * 0.6
+          )::numeric,
+          0
+        )::float AS overall,
+        COALESCE(tq.quiz_count, 0)::int AS quizzes,
+        COALESCE(tp.project_count, 0)::int AS projects
+      FROM teacher_students ts
+      LEFT JOIN teacher_quizzes tq
+        ON tq.student_id = ts.id
+      LEFT JOIN teacher_projects tp
+        ON tp.student_id = ts.id
+      ORDER BY ts.kelas ASC, ts.nama ASC
+      `,
+      [teacherId, kelas || null]
+    );
+
+    const students = result.rows.map((student) => ({
+      ...student,
+      avatar: student.name
+        .split(" ")
+        .map((word) => word[0])
+        .join("")
+        .slice(0, 2)
+        .toUpperCase(),
+      trend: "stable",
+    }));
+
+    res.json(students);
+  } catch (err) {
+    console.error("GET TEACHER STUDENT GRADE SUMMARY ERROR:", err);
+    res.status(500).json({
+      message: "Gagal mengambil daftar nilai siswa",
+      error: err.message,
+    });
+  }
+});
+
+app.get("/api/guru/teaching-classes", authenticateToken, authorizeRole(["guru"]), async (req, res) => {
+  try {
+    const teacherId = req.user.id;
+
+    const result = await pool.query(
+      `
+      WITH quiz_classes AS (
+        SELECT DISTINCT q.kelas AS kelas
+        FROM quizzes q
+        WHERE q.created_by = $1
+          AND q.kelas IS NOT NULL
+      ),
+      project_classes AS (
+        SELECT DISTINCT k.nama AS kelas
+        FROM projects p
+        JOIN kelas k
+          ON k.id = p.class_id
+        WHERE p.created_by = $1
+      )
+      SELECT DISTINCT kelas
+      FROM (
+        SELECT kelas FROM quiz_classes
+        UNION
+        SELECT kelas FROM project_classes
+      ) x
+      WHERE kelas IS NOT NULL
+      ORDER BY kelas ASC
+      `,
+      [teacherId]
+    );
+
+    res.json(result.rows);
+  } catch (err) {
+    console.error("GET TEACHING CLASSES ERROR:", err);
+    res.status(500).json({
+      message: "Gagal mengambil daftar kelas guru",
+      error: err.message,
+    });
+  }
+});
+
+// ================= SUBMIT MULTIPLE CHOICE =================
+app.post("/api/student/quizzes/:quizId/submit-mc", authenticateToken, authorizeRole(["siswa"]), async (req, res) => {
+  const client = await pool.connect();
+
+  try {
+    const { quizId } = req.params;
+    const studentId = req.user.id;
+    const { answers } = req.body;
+
+    await client.query("BEGIN");
+
+    // ambil semua soal + jawaban benar
+    const questions = await client.query(
+      `
+      SELECT 
+        qq.id AS question_id,
+        qo.id AS option_id,
+        qo.is_correct
+      FROM quiz_questions qq
+      JOIN quiz_options qo ON qo.question_id = qq.id
+      WHERE qq.quiz_id = $1
+    `,
+      [quizId]
+    );
+
+    let correct = 0;
+    let total = 0;
+
+    answers.forEach((ans) => {
+      total++;
+
+      const correctOption = questions.rows.find((q) => q.question_id === ans.questionId && q.is_correct);
+
+      if (correctOption && correctOption.option_id === ans.selectedOptionId) {
+        correct++;
+      }
+    });
+
+    const score = Math.round((correct / total) * 100);
+
+    // 🚨 CEK apakah sudah pernah submit
+    const existing = await client.query(`SELECT id FROM quiz_submissions WHERE quiz_id=$1 AND student_id=$2`, [quizId, studentId]);
+
+    let submission;
+
+    if (existing.rows.length > 0) {
+      // update
+      const update = await client.query(
+        `
+        UPDATE quiz_submissions
+        SET total_score = $1,
+            status = 'graded',
+            graded_at = NOW()
+        WHERE id = $2
+        RETURNING *
+        `,
+        [score, existing.rows[0].id]
+      );
+
+      submission = update.rows[0];
+    } else {
+      // insert baru
+      const insert = await client.query(
+        `
+        INSERT INTO quiz_submissions
+        (quiz_id, student_id, total_score, status, submitted_at, graded_at)
+        VALUES ($1,$2,$3,'graded',NOW(),NOW())
+        RETURNING *
+        `,
+        [quizId, studentId, score]
+      );
+
+      submission = insert.rows[0];
+    }
+
+    await client.query("COMMIT");
+
+    res.json({
+      message: "Quiz MC berhasil disubmit",
+      score,
+      submission,
+    });
+  } catch (err) {
+    await client.query("ROLLBACK");
+    console.error("SUBMIT MC ERROR:", err);
+    res.status(500).json({ error: err.message });
+  } finally {
+    client.release();
   }
 });
 

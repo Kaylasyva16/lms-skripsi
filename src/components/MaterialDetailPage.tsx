@@ -62,15 +62,21 @@ export function MaterialDetailPage({ onClose }: MaterialDetailPageProps) {
     try {
       setLoading(true);
 
-      const siswaId = 1;
+      const user = JSON.parse(localStorage.getItem("user") || "{}");
+      const siswaId = user.id;
+
+      console.log("USER LOGIN:", user);
+      console.log("SISWA ID MATERI:", siswaId);
+
       const res = await axios.get(`http://localhost:5000/api/courses/1/modules?siswaId=${siswaId}`);
+
       const rawModules = res.data;
 
       const mapped = rawModules.map((m: any, index: number) => {
         const prevModule = rawModules[index - 1];
 
-        const prevCompleted = Number(prevModule?.completed_materials ?? prevModule?.completed ?? 0);
-        const prevTotal = Number(prevModule?.total_materials ?? prevModule?.total ?? 0);
+        const prevCompleted = Number(prevModule?.completed_materials ?? 0);
+        const prevTotal = Number(prevModule?.total_materials ?? 0);
 
         return {
           id: m.id,
@@ -78,8 +84,8 @@ export function MaterialDetailPage({ onClose }: MaterialDetailPageProps) {
           subtitle: "",
           description: m.description,
           duration: m.duration,
-          total: Number(m.total_materials ?? m.total ?? 0),
-          completed: Number(m.completed_materials ?? m.completed ?? 0),
+          total: Number(m.total_materials ?? 0),
+          completed: Number(m.completed_materials ?? 0),
           topics: normalizeTopics(m.topics),
           unlocked: index === 0 || prevCompleted >= prevTotal,
           level: "Beginner",

@@ -210,7 +210,11 @@ export function ProjectDetailPage({ projectId, onClose }: ProjectDetailPageProps
 
     try {
       setUploadingStageId(stageId);
+
       const token = localStorage.getItem("token");
+      if (!token) {
+        throw new Error("Token login tidak ditemukan");
+      }
 
       for (const file of Array.from(files)) {
         const formData = new FormData();
@@ -225,15 +229,19 @@ export function ProjectDetailPage({ projectId, onClose }: ProjectDetailPageProps
           body: formData,
         });
 
+        const data = await res.json().catch(() => null);
+
         if (!res.ok) {
-          throw new Error("Gagal upload file");
+          throw new Error(data?.message || data?.error || `Upload gagal (${res.status})`);
         }
       }
 
       await fetchDetail();
       event.target.value = "";
-    } catch (err) {
-      console.error(err);
+      alert("File berhasil diupload");
+    } catch (err: any) {
+      console.error("UPLOAD ERROR:", err);
+      alert(err.message || "Gagal upload file");
     } finally {
       setUploadingStageId(null);
     }
@@ -462,8 +470,6 @@ export function ProjectDetailPage({ projectId, onClose }: ProjectDetailPageProps
                       </label>
                       <span className="text-xs text-gray-500">PDF, DOC, Gambar, ZIP</span>
                     </div>
-
-                    
 
                     {stage.files && stage.files.length > 0 && (
                       <div className="space-y-2 mt-3">

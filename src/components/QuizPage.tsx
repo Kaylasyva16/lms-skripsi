@@ -3,16 +3,12 @@ import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
 import { Progress } from "./ui/progress";
-import { RadioGroup, RadioGroupItem } from "./ui/radio-group";
-import { Label } from "./ui/label";
-import { Input } from "./ui/input";
 import { Textarea } from "./ui/textarea";
-import { Clock, Trophy, CheckCircle, CheckCircle2, XCircle, Award, Play, BookOpen, Target, Timer, ChevronLeft, ChevronRight, Flag, GripVertical, Sparkles, Flame, Bug, Puzzle, GitBranch, Cpu, Code2 } from "lucide-react";
+import { Clock, Trophy, CheckCircle, CheckCircle2, XCircle, Award, Play, BookOpen, Timer, GripVertical, Sparkles, Flame } from "lucide-react";
 import { toast } from "sonner@2.0.3";
 import { DndProvider, useDrag, useDrop } from "react-dnd";
 import { HTML5Backend } from "react-dnd-html5-backend";
 
-// Types for questions
 type QuestionType = "multiple-choice" | "essay" | "matching" | "logic-flow" | "debugging" | "simulation" | "drag-drop";
 type DifficultyLevel = "Mudah" | "Sedang" | "Sulit";
 
@@ -28,6 +24,7 @@ interface MultipleChoiceQuestion extends BaseQuestion {
   type: "multiple-choice";
   options: string[];
   correctAnswer: number;
+  optionIds?: number[];
 }
 
 interface EssayQuestion extends BaseQuestion {
@@ -77,510 +74,6 @@ interface DragDropQuestion extends BaseQuestion {
 
 type Question = MultipleChoiceQuestion | EssayQuestion | MatchingQuestion | LogicFlowQuestion | DebuggingQuestion | SimulationQuestion | DragDropQuestion;
 
-// Quiz 1: Multiple Choice - Percabangan IF
-const quiz1Questions: Question[] = [
-  {
-    id: 1,
-    type: "multiple-choice",
-    difficulty: "Mudah",
-    question: "Apa fungsi utama dari statement IF dalam pemrograman?",
-    options: ["Untuk mengulang blok kode tertentu", "Untuk membuat keputusan berdasarkan kondisi", "Untuk mendeklarasikan variabel", "Untuk menampilkan output ke layar"],
-    correctAnswer: 1,
-    points: 10,
-  },
-  {
-    id: 2,
-    type: "multiple-choice",
-    difficulty: "Mudah",
-    question: 'Operator relasional mana yang digunakan untuk memeriksa "sama dengan"?',
-    options: ["=", "==", "===", "!="],
-    correctAnswer: 1,
-    points: 10,
-  },
-  {
-    id: 3,
-    type: "multiple-choice",
-    difficulty: "Sedang",
-    question: 'Perhatikan kode:\nint nilai = 85;\nif (nilai >= 80) cout << "A";\nelse if (nilai >= 70) cout << "B";\n\nApa output dari kode tersebut?',
-    options: ["A", "B", "A B", "Error"],
-    correctAnswer: 0,
-    points: 20,
-  },
-  {
-    id: 4,
-    type: "multiple-choice",
-    difficulty: "Sedang",
-    question: "Operator logika mana yang menghasilkan TRUE jika SALAH SATU kondisi bernilai TRUE?",
-    options: ["&&", "||", "!", "=="],
-    correctAnswer: 1,
-    points: 20,
-  },
-  {
-    id: 5,
-    type: "multiple-choice",
-    difficulty: "Sulit",
-    question: 'Perhatikan kode:\nint x = 5, y = 10;\nif (x > 3 && y < 15) cout << "Benar";\nelse cout << "Salah";\n\nApa output kode tersebut?',
-    options: ["Benar", "Salah", "Error", "Tidak ada output"],
-    correctAnswer: 0,
-    points: 30,
-  },
-  {
-    id: 6,
-    type: "multiple-choice",
-    difficulty: "Sulit",
-    question: "Kapan sebaiknya menggunakan SWITCH-CASE dibanding IF-ELSE?",
-    options: ["Ketika menggunakan operator logika kompleks", "Ketika kondisi hanya mengecek satu variabel dengan banyak nilai tetap", "Ketika kondisi sangat kompleks", "Tidak ada perbedaan"],
-    correctAnswer: 1,
-    points: 30,
-  },
-  {
-    id: 7,
-    type: "essay",
-    difficulty: "Sedang",
-    question: "Jelaskan perbedaan antara IF dan IF-ELSE statement beserta contoh penggunaannya masing-masing!",
-    points: 25,
-    minWords: 30,
-    keywords: ["kondisi", "else", "alternatif", "true", "false", "validasi"],
-    sampleAnswer:
-      "IF statement hanya menjalankan kode jika kondisi true, sedangkan IF-ELSE menyediakan alternatif kode yang dijalankan jika kondisi false. Contoh IF: validasi input sederhana \"if (umur >= 18) cout << 'Boleh masuk'\". Contoh IF-ELSE: \"if (nilai >= 70) cout << 'Lulus'; else cout << 'Tidak Lulus'\" untuk menampilkan kedua kemungkinan.",
-  },
-];
-
-// Quiz 2: Drag & Drop - Alur Percabangan
-const quiz2Questions: Question[] = [
-  {
-    id: 1,
-    type: "drag-drop",
-    difficulty: "Mudah",
-    question: "Susun urutan eksekusi percabangan IF-ELSE dengan benar!",
-    items: ["Evaluasi kondisi IF", "Jika TRUE, jalankan blok IF", "Jika FALSE, jalankan blok ELSE", "Lanjut ke statement setelah IF-ELSE", "Program selesai"],
-    correctOrder: [0, 1, 2, 3, 4],
-    points: 10,
-  },
-  {
-    id: 2,
-    type: "drag-drop",
-    difficulty: "Mudah",
-    question: "Susun urutan proses input-proses-output!",
-    items: ["Input data", "Proses perhitungan", "Output hasil"],
-    correctOrder: [0, 1, 2],
-    points: 10,
-  },
-  {
-    id: 3,
-    type: "drag-drop",
-    difficulty: "Sedang",
-    question: "Susun langkah-langkah algoritma untuk mencari nilai maksimum dari array!",
-    items: ["Inisialisasi max dengan elemen pertama", "Loop untuk setiap elemen array", "Bandingkan elemen dengan max", "Jika elemen > max, update max", "Return nilai max"],
-    correctOrder: [0, 1, 2, 3, 4],
-    points: 20,
-  },
-  {
-    id: 4,
-    type: "drag-drop",
-    difficulty: "Sedang",
-    question: "Susun tahapan dalam membuat flowchart yang benar!",
-    items: ["Tentukan start dan end point", "Identifikasi proses utama", "Tambahkan decision points", "Hubungkan dengan flow lines", "Verifikasi alur logika"],
-    correctOrder: [0, 1, 2, 3, 4],
-    points: 20,
-  },
-  {
-    id: 5,
-    type: "drag-drop",
-    difficulty: "Sulit",
-    question: "Susun langkah-langkah algoritma Bubble Sort!",
-    items: ["Mulai dari index pertama", "Bandingkan dua elemen berurutan", "Tukar jika elemen kiri > elemen kanan", "Lanjut ke pasangan berikutnya", "Ulangi sampai tidak ada pertukaran", "Array terurut"],
-    correctOrder: [0, 1, 2, 3, 4, 5],
-    points: 30,
-  },
-  {
-    id: 6,
-    type: "drag-drop",
-    difficulty: "Sulit",
-    question: "Susun langkah-langkah algoritma Binary Search!",
-    items: [
-      "Pastikan array sudah terurut",
-      "Tentukan index low, high, dan mid",
-      "Bandingkan target dengan elemen mid",
-      "Jika target = mid, return index",
-      "Jika target < mid, cari di kiri",
-      "Jika target > mid, cari di kanan",
-      "Ulangi hingga ketemu atau low > high",
-    ],
-    correctOrder: [0, 1, 2, 3, 4, 5, 6],
-    points: 30,
-  },
-];
-
-// Quiz 3: Matching
-const quiz3Questions: Question[] = [
-  {
-    id: 1,
-    type: "matching",
-    difficulty: "Mudah",
-    question: "Cocokkan perintah SQL dasar dengan fungsinya!",
-    leftItems: ["SELECT", "INSERT", "UPDATE"],
-    rightItems: ["Mengubah data", "Mengambil data", "Menambah data"],
-    correctMatches: {
-      0: 1,
-      1: 2,
-      2: 0,
-    },
-    points: 10,
-  },
-  {
-    id: 2,
-    type: "matching",
-    difficulty: "Mudah",
-    question: "Cocokkan tipe data dengan contohnya!",
-    leftItems: ["INTEGER", "VARCHAR", "DATE"],
-    rightItems: ["Teks dengan panjang variabel", "Tanggal", "Bilangan bulat"],
-    correctMatches: {
-      0: 2,
-      1: 0,
-      2: 1,
-    },
-    points: 10,
-  },
-  {
-    id: 3,
-    type: "matching",
-    difficulty: "Sedang",
-    question: "Cocokkan jenis JOIN dengan fungsinya!",
-    leftItems: ["INNER JOIN", "LEFT JOIN", "RIGHT JOIN", "FULL JOIN"],
-    rightItems: ["Semua data dari tabel kanan", "Hanya data yang match di kedua tabel", "Semua data dari kedua tabel", "Semua data dari tabel kiri"],
-    correctMatches: {
-      0: 1,
-      1: 3,
-      2: 0,
-      3: 2,
-    },
-    points: 20,
-  },
-  {
-    id: 4,
-    type: "matching",
-    difficulty: "Sedang",
-    question: "Cocokkan constraint dengan fungsinya!",
-    leftItems: ["PRIMARY KEY", "FOREIGN KEY", "UNIQUE", "NOT NULL"],
-    rightItems: ["Data tidak boleh kosong", "Identifikasi unik record", "Relasi antar tabel", "Nilai harus unik"],
-    correctMatches: {
-      0: 1,
-      1: 2,
-      2: 3,
-      3: 0,
-    },
-    points: 20,
-  },
-  {
-    id: 5,
-    type: "matching",
-    difficulty: "Sulit",
-    question: "Cocokkan fungsi agregat SQL dengan kegunaannya!",
-    leftItems: ["COUNT()", "AVG()", "MAX()", "SUM()", "MIN()"],
-    rightItems: ["Nilai terkecil", "Nilai terbesar", "Jumlah total", "Rata-rata", "Jumlah baris"],
-    correctMatches: {
-      0: 4,
-      1: 3,
-      2: 1,
-      3: 2,
-      4: 0,
-    },
-    points: 30,
-  },
-  {
-    id: 6,
-    type: "matching",
-    difficulty: "Sulit",
-    question: "Cocokkan bentuk normal database dengan karakteristiknya!",
-    leftItems: ["1NF", "2NF", "3NF", "BCNF"],
-    rightItems: ["Tidak ada transitive dependency", "Setiap determinan adalah candidate key", "Tidak ada partial dependency", "Atomic values, no repeating groups"],
-    correctMatches: {
-      0: 3,
-      1: 2,
-      2: 0,
-      3: 1,
-    },
-    points: 30,
-  },
-];
-
-// Quiz 4: Logic Flow
-const quiz4Questions: Question[] = [
-  {
-    id: 1,
-    type: "logic-flow",
-    difficulty: "Mudah",
-    question: "Lengkapi flow logic berikut: START → [blank] → PROSES → OUTPUT → END",
-    flowSteps: ["START", "[blank]", "PROSES", "OUTPUT", "END"],
-    blanks: [1],
-    options: ["INPUT", "DECISION", "LOOP", "FUNCTION"],
-    correctAnswers: [0],
-    points: 10,
-  },
-  {
-    id: 2,
-    type: "logic-flow",
-    difficulty: "Mudah",
-    question: "Jika x = 5, maka pada kondisi IF (x > 3), hasilnya adalah:",
-    flowSteps: ["x = 5", "IF (x > 3)", "[blank]"],
-    blanks: [2],
-    options: ["TRUE", "FALSE", "NULL", "ERROR"],
-    correctAnswers: [0],
-    points: 10,
-  },
-  {
-    id: 3,
-    type: "logic-flow",
-    difficulty: "Sedang",
-    question: "Lengkapi flow: IF (nilai >= 70) THEN [blank] ELSE [blank]",
-    flowSteps: ["IF (nilai >= 70)", "THEN [blank]", "ELSE [blank]"],
-    blanks: [1, 2],
-    options: ["LULUS", "TIDAK LULUS", "REMEDIAL", "SKIP"],
-    correctAnswers: [0, 1],
-    points: 20,
-  },
-  {
-    id: 4,
-    type: "logic-flow",
-    difficulty: "Sedang",
-    question: "Dalam nested IF, jika kondisi luar FALSE, maka kondisi dalam:",
-    flowSteps: ["IF (outer)", "  IF (inner)", "    [blank]"],
-    blanks: [2],
-    options: ["Tidak dievaluasi", "Tetap dievaluasi", "Menjadi TRUE", "Error"],
-    correctAnswers: [0],
-    points: 20,
-  },
-  {
-    id: 5,
-    type: "logic-flow",
-    difficulty: "Sulit",
-    question: "FOR i=1 TO 3: total += i. Nilai total akhir adalah:",
-    flowSteps: ["total = 0", "FOR i=1 TO 3", "  total += i", "END FOR", "total = [blank]"],
-    blanks: [4],
-    options: ["3", "6", "9", "12"],
-    correctAnswers: [1],
-    points: 30,
-  },
-  {
-    id: 6,
-    type: "logic-flow",
-    difficulty: "Sulit",
-    question: "WHILE (x < 10): x = x * 2. Jika x awal = 2, berapa kali loop?",
-    flowSteps: ["x = 2", "WHILE (x < 10)", "  x = x * 2", "Loop count = [blank]"],
-    blanks: [3],
-    options: ["2 kali", "3 kali", "4 kali", "5 kali"],
-    correctAnswers: [1],
-    points: 30,
-  },
-];
-
-// Quiz 5: Debugging
-const quiz5Questions: Question[] = [
-  {
-    id: 1,
-    type: "debugging",
-    difficulty: "Mudah",
-    question: "Temukan error pada kode berikut:",
-    code: `1: int x = 10;\n2: int y = 20\n3: int sum = x + y;\n4: print(sum);`,
-    errorLines: [2],
-    options: ["Baris 2: Kurang semicolon (;)", "Baris 1: Salah tipe data", "Baris 3: Operator salah", "Baris 4: Fungsi print salah"],
-    correctAnswer: 0,
-    points: 10,
-  },
-  {
-    id: 2,
-    type: "debugging",
-    difficulty: "Mudah",
-    question: "Ada bug pada kode ini:",
-    code: `1: String name = "John";\n2: int age = "25";\n3: print(name + age);`,
-    errorLines: [2],
-    options: ["Baris 2: Tipe data int tidak bisa diisi string", "Baris 1: String salah", "Baris 3: Tidak bisa concat", "Tidak ada error"],
-    correctAnswer: 0,
-    points: 10,
-  },
-  {
-    id: 3,
-    type: "debugging",
-    difficulty: "Sedang",
-    question: "Perbaiki logic error:",
-    code: `1: for(int i=0; i<5; i++){\n2:   if(i = 3){\n3:     print("Found");\n4:   }\n5: }`,
-    errorLines: [2],
-    options: ["Baris 2: Harus menggunakan == bukan =", "Baris 1: Loop salah", "Baris 3: Print salah", "Baris 5: Kurung kurang"],
-    correctAnswer: 0,
-    points: 20,
-  },
-  {
-    id: 4,
-    type: "debugging",
-    difficulty: "Sedang",
-    question: "Kenapa terjadi infinite loop?",
-    code: `1: int i = 0;\n2: while(i < 10){\n3:   print(i);\n4: }`,
-    errorLines: [2, 3],
-    options: ["Tidak ada increment i++", "Kondisi while salah", "Print tidak perlu", "Tipe data salah"],
-    correctAnswer: 0,
-    points: 20,
-  },
-  {
-    id: 5,
-    type: "debugging",
-    difficulty: "Sulit",
-    question: "Array index out of bounds:",
-    code: `1: int[] arr = {1,2,3};\n2: for(int i=0; i<=3; i++){\n3:   print(arr[i]);\n4: }`,
-    errorLines: [2],
-    options: ["Baris 2: Kondisi harus i<3 bukan i<=3", "Baris 1: Array salah", "Baris 3: Index salah", "Tidak ada error"],
-    correctAnswer: 0,
-    points: 30,
-  },
-  {
-    id: 6,
-    type: "debugging",
-    difficulty: "Sulit",
-    question: "Null pointer exception terjadi di:",
-    code: `1: String text = null;\n2: int length = text.length();\n3: print(length);`,
-    errorLines: [2],
-    options: ["Baris 2: Memanggil method pada null object", "Baris 1: Deklarasi salah", "Baris 3: Print salah", "Baris 2: length() tidak ada"],
-    correctAnswer: 0,
-    points: 30,
-  },
-];
-
-// Quiz 6: Simulation
-const quiz6Questions: Question[] = [
-  {
-    id: 1,
-    type: "simulation",
-    difficulty: "Mudah",
-    question: "Simulasi: Jumlahkan 5 + 3",
-    scenario: "Susun langkah eksekusi operasi penjumlahan dengan benar",
-    instruction: "Drag & drop langkah-langkah berikut sesuai urutan yang benar",
-    steps: ["Input nilai 5", "Input nilai 3", "Proses: 5 + 3 = 8", "Output: 8"],
-    correctOrder: [0, 1, 2, 3],
-    explanation: "Urutan yang benar: Input kedua nilai → Proses penjumlahan → Output hasil",
-    points: 10,
-  },
-  {
-    id: 2,
-    type: "simulation",
-    difficulty: "Mudah",
-    question: "Simulasi: Cek kondisi IF (7 > 5)",
-    scenario: "Susun langkah eksekusi kondisional dengan benar",
-    instruction: "Drag & drop langkah-langkah berikut sesuai urutan yang benar",
-    steps: ["Baca nilai 7", "Baca nilai 5", "Evaluasi: 7 > 5", "Hasil: TRUE"],
-    correctOrder: [0, 1, 2, 3],
-    explanation: "Urutan yang benar: Baca nilai → Evaluasi kondisi → Hasil boolean",
-    points: 10,
-  },
-  {
-    id: 3,
-    type: "simulation",
-    difficulty: "Sedang",
-    question: "Simulasi: Loop FOR dari 1 sampai 3",
-    scenario: "Susun langkah eksekusi loop dengan benar",
-    instruction: "Drag & drop langkah-langkah berikut sesuai urutan yang benar",
-    steps: ["Inisialisasi i = 1", "Iterasi 1: i=1, print 1", "Iterasi 2: i=2, print 2", "Iterasi 3: i=3, print 3", "Loop selesai"],
-    correctOrder: [0, 1, 2, 3, 4],
-    explanation: "Urutan yang benar: Inisialisasi → Iterasi berurutan → Loop selesai",
-    points: 20,
-  },
-  {
-    id: 4,
-    type: "simulation",
-    difficulty: "Sedang",
-    question: "Simulasi: Swap nilai a=5 dan b=10",
-    scenario: "Susun langkah swap dua variabel dengan benar",
-    instruction: "Drag & drop langkah-langkah berikut sesuai urutan yang benar",
-    steps: ["Simpan a ke temp (temp=5)", "Salin b ke a (a=10)", "Salin temp ke b (b=5)", "Hasil: a=10, b=5"],
-    correctOrder: [0, 1, 2, 3],
-    explanation: "Urutan yang benar: Simpan a → Pindah b ke a → Pindah temp ke b → Selesai",
-    points: 20,
-  },
-  {
-    id: 5,
-    type: "simulation",
-    difficulty: "Sulit",
-    question: "Simulasi: Bubble Sort untuk [3,1,2]",
-    scenario: "Susun langkah algoritma Bubble Sort dengan benar",
-    instruction: "Drag & drop langkah-langkah berikut sesuai urutan yang benar",
-    steps: ["Mulai dari index 0", "Bandingkan 3 dan 1", "Swap: [1,3,2]", "Bandingkan 3 dan 2", "Swap: [1,2,3]", "Pass 1 selesai"],
-    correctOrder: [0, 1, 2, 3, 4, 5],
-    explanation: "Urutan yang benar: Mulai → Bandingkan pasangan berurutan → Swap jika perlu → Selesai",
-    points: 30,
-  },
-  {
-    id: 6,
-    type: "simulation",
-    difficulty: "Sulit",
-    question: "Simulasi: Binary Search cari 7 di [1,3,5,7,9]",
-    scenario: "Susun langkah algoritma Binary Search dengan benar",
-    instruction: "Drag & drop langkah-langkah berikut sesuai urutan yang benar",
-    steps: ["Set low=0, high=4, mid=2", "arr[2]=5, target 7>5", "Set low=3, high=4, mid=3", "arr[3]=7, target found!", "Return index 3"],
-    correctOrder: [0, 1, 2, 3, 4],
-    explanation: "Urutan yang benar: Hitung mid → Bandingkan → Geser range → Ketemu → Return",
-    points: 30,
-  },
-];
-
-// Quiz 7: Essay Questions
-const quiz7Questions: Question[] = [
-  {
-    id: 1,
-    type: "essay",
-    difficulty: "Sedang",
-    question: "Jelaskan apa itu nested IF dan berikan contoh kode nested IF untuk menentukan kelulusan siswa dengan syarat: nilai >= 70 DAN kehadiran >= 75%!",
-    points: 30,
-    minWords: 50,
-    keywords: ["nested", "if", "bersarang", "kondisi", "didalam", "nilai", "kehadiran"],
-    sampleAnswer:
-      'Nested IF adalah IF didalam IF untuk kondisi bertingkat. Contoh:\n\nif (nilai >= 70) {\n  if (kehadiran >= 75) {\n    cout << "LULUS";\n  } else {\n    cout << "Tidak Lulus: Kehadiran kurang";\n  }\n} else {\n  cout << "Tidak Lulus: Nilai kurang";\n}\n\nNested IF berguna untuk validasi bertingkat dimana kondisi kedua hanya dicek jika kondisi pertama terpenuhi.',
-  },
-  {
-    id: 2,
-    type: "essay",
-    difficulty: "Sedang",
-    question: "Jelaskan perbedaan antara FOR loop dan WHILE loop! Kapan sebaiknya menggunakan masing-masing jenis loop tersebut?",
-    points: 30,
-    minWords: 50,
-    keywords: ["for", "while", "iterasi", "counter", "kondisi", "pasti", "tidak pasti"],
-    sampleAnswer:
-      "FOR loop digunakan ketika jumlah iterasi sudah diketahui/pasti, memiliki struktur: inisialisasi, kondisi, increment dalam satu baris. Cocok untuk iterasi array atau counter tetap. WHILE loop digunakan ketika jumlah iterasi tidak pasti, tergantung kondisi dinamis. Cocok untuk validasi input atau menunggu kondisi tertentu. Contoh FOR: cetak 1-10. Contoh WHILE: input password sampai benar.",
-  },
-  {
-    id: 3,
-    type: "essay",
-    difficulty: "Sulit",
-    question: "Buatlah pseudocode untuk program yang menggunakan nested loop untuk mencetak pola segitiga angka berikut:\n1\n12\n123\n1234\n12345\n\nJelaskan logika dari setiap loop!",
-    points: 35,
-    minWords: 60,
-    keywords: ["nested", "loop", "for", "outer", "inner", "baris", "kolom", "pola"],
-    sampleAnswer:
-      "Pseudocode:\n\nFOR i = 1 TO 5 DO\n  FOR j = 1 TO i DO\n    PRINT j\n  END FOR\n  PRINT newline\nEND FOR\n\nLogika: Loop OUTER (i) mengontrol jumlah baris (1-5). Loop INNER (j) mengontrol angka yang dicetak di setiap baris. Pada baris ke-i, j berjalan dari 1 sampai i, sehingga baris 1 cetak 1 angka, baris 2 cetak 2 angka, dst. Setiap selesai inner loop, print newline untuk baris baru.",
-  },
-  {
-    id: 4,
-    type: "essay",
-    difficulty: "Sulit",
-    question: "Jelaskan perbedaan antara BREAK dan CONTINUE dalam loop! Berikan contoh penggunaan masing-masing dalam konteks percabangan dan perulangan!",
-    points: 35,
-    minWords: 60,
-    keywords: ["break", "continue", "keluar", "skip", "iterasi", "loop", "terminasi"],
-    sampleAnswer:
-      'BREAK digunakan untuk keluar dari loop sepenuhnya dan melanjutkan eksekusi setelah loop. Contoh: mencari angka dalam array, jika ketemu langsung break. CONTINUE digunakan untuk skip iterasi saat ini dan lanjut ke iterasi berikutnya. Contoh: cetak bilangan ganjil dengan "if(i%2==0) continue". BREAK menghentikan seluruh loop, CONTINUE hanya skip satu iterasi. Keduanya sering dikombinasi dengan IF untuk kontrol flow yang lebih presisi.',
-  },
-  {
-    id: 5,
-    type: "essay",
-    difficulty: "Sulit",
-    question: "Jelaskan mengapa nested loop 3 tingkat atau lebih perlu dihindari! Apa dampaknya terhadap performa program dan bagaimana cara mengoptimalkannya?",
-    points: 40,
-    minWords: 70,
-    keywords: ["complexity", "performance", "O(n³)", "efisiensi", "optimasi", "algoritma"],
-    sampleAnswer:
-      "Nested loop meningkatkan time complexity secara eksponensial: 1 tingkat = O(n), 2 tingkat = O(n²), 3 tingkat = O(n³). Jika n=1000, nested 3 tingkat = 1 miliar iterasi! Dampaknya: program sangat lambat, boros memori dan CPU. Optimasi: 1) Gunakan algoritma lebih efisien (hash table, binary search), 2) Break/continue untuk kurangi iterasi tidak perlu, 3) Pisahkan logika ke fungsi terpisah, 4) Cache hasil yang sering digunakan, 5) Gunakan struktur data yang tepat.",
-  },
-];
-
-// Drag and Drop Components
 interface DragItem {
   index: number;
   text: string;
@@ -628,51 +121,47 @@ function MatchingItem({ leftItem, index, selectedMatch, onSelect }: { leftItem: 
   );
 }
 
-const getDifficultyColor = (difficulty: DifficultyLevel) => {
-  switch (difficulty) {
-    case "Mudah":
-      return "bg-green-500 text-white";
-    case "Sedang":
-      return "bg-orange-500 text-white";
-    case "Sulit":
-      return "bg-red-500 text-white";
+const getLevelColor = (level: string) => {
+  switch (level) {
+    case "Beginner":
+      return "bg-green-500 hover:bg-green-600";
+    case "Intermediate":
+      return "bg-blue-500 hover:bg-blue-600";
+    case "Expert":
+      return "bg-purple-500 hover:bg-purple-600";
     default:
-      return "bg-gray-500 text-white";
-  }
-};
-
-const getDifficultyIcon = (difficulty: DifficultyLevel) => {
-  switch (difficulty) {
-    case "Mudah":
-      return "⭐";
-    case "Sedang":
-      return "⭐⭐";
-    case "Sulit":
-      return "⭐⭐⭐";
-    default:
-      return "";
+      return "bg-gray-500 hover:bg-gray-600";
   }
 };
 
 type ViewMode = "list" | "detail" | "quiz" | "result";
 
 export function QuizPage() {
-  // ===== ROLE SETUP =====
-  const userRole: "student" | "teacher" = "student";
-  // ganti ke 'teacher' kalau mau test akses penuh
-
-  const isQuizAllowed = (_quiz: any) => true;
-
   const [viewMode, setViewMode] = useState<ViewMode>("list");
-  const [selectedQuiz, setSelectedQuiz] = useState<(typeof quizzes)[0] | null>(null);
+  const [selectedQuiz, setSelectedQuiz] = useState<any | null>(null);
   const [currentQuestion, setCurrentQuestion] = useState(0);
   const [answers, setAnswers] = useState<Record<number, any>>({});
   const [timeLeft, setTimeLeft] = useState(0);
-  const [quizResult, setQuizResult] = useState<{ score: number; correct: number; total: number; totalPoints: number; earnedPoints: number; hasEssay: boolean } | null>(null);
+  const [quizResult, setQuizResult] = useState<{
+    score: number;
+    correct: number;
+    total: number;
+    totalPoints: number;
+    earnedPoints: number;
+    hasEssay: boolean;
+  } | null>(null);
   const [quizQuestions, setQuizQuestions] = useState<Question[]>([]);
-
+  const [quizzes, setQuizzes] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [showSuccess, setShowSuccess] = useState(false);
+
+  const [dragItems, setDragItems] = useState<string[]>([]);
+  const [selectedLeft, setSelectedLeft] = useState<number | null>(null);
+  const [matches, setMatches] = useState<Record<number, number>>({});
+  const [logicAnswers, setLogicAnswers] = useState<string[]>([]);
+  const [simulationSteps, setSimulationSteps] = useState<string[]>([]);
+  const [simulationRun, setSimulationRun] = useState(false);
+
   useEffect(() => {
     if (showSuccess) {
       const timer = setTimeout(() => {
@@ -683,89 +172,15 @@ export function QuizPage() {
     }
   }, [showSuccess]);
 
-  const isSubmittedEssayQuiz = (quiz: any) => {
-    return !!quiz.submissionId || quiz.submissionStatus === "submitted" || quiz.submissionStatus === "graded";
+  const isQuizAllowed = (quiz: any) => {
+    return !(quiz.submissionStatus === "submitted" || quiz.submissionStatus === "graded" || quiz.submissionId);
   };
 
   const getQuizButtonLabel = (quiz: any) => {
-    if (quiz.submissionStatus === "graded") return "Lihat Nilai";
-    if (quiz.submissionStatus === "submitted" || quiz.submissionId) return "Menunggu Penilaian";
+    if (quiz.submissionStatus === "graded") return "Lihat Hasil";
+    if (quiz.submissionStatus === "submitted" || quiz.submissionId) return "Sudah Dikerjakan";
     return "Mulai Kuis";
   };
-
-  const handleStartQuiz = async (quiz: any) => {
-    if (!isQuizAllowed(quiz.type as QuestionType)) {
-      toast.error("Kuis ini tidak tersedia untuk siswa.");
-      return;
-    }
-
-    try {
-      const token = localStorage.getItem("token");
-
-      const detailRes = await fetch(`http://localhost:5000/api/student/quizzes/${quiz.id}`, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      });
-
-      if (!detailRes.ok) {
-        throw new Error("Gagal mengambil status quiz");
-      }
-
-      const latestQuiz = await detailRes.json();
-
-      // jika sudah submit → langsung result
-      if (latestQuiz.submissionStatus === "submitted" || latestQuiz.submissionStatus === "graded" || latestQuiz.submissionId) {
-        setSelectedQuiz(latestQuiz);
-
-        setQuizResult({
-          score: latestQuiz.totalScore ?? 0,
-          correct: 0,
-          total: latestQuiz.totalQuestions ?? 0,
-          totalPoints: latestQuiz.totalPoints ?? 0,
-          earnedPoints: 0,
-          hasEssay: true,
-        });
-
-        setViewMode("result");
-        return;
-      }
-
-      // ambil soal jika belum submit
-      const res = await fetch(`http://localhost:5000/api/student/quizzes/${quiz.id}/questions`, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
-      });
-
-      if (!res.ok) {
-        throw new Error("Gagal mengambil detail kuis");
-      }
-
-      const data = await res.json();
-
-      const filteredQuestions = data
-        .filter((q: any) => q.type === "multiple-choice" || q.type === "essay")
-        .map((q: any) => ({
-          id: q.id,
-          type: q.type,
-          question: q.questionText,
-          points: q.points ?? 10,
-          difficulty: q.payload?.difficulty ?? "Sedang",
-          options: q.options?.map((opt: any) => opt.optionText) || [],
-          correctAnswer: q.options?.findIndex((opt: any) => opt.isCorrect) ?? 0,
-        }));
-
-      setSelectedQuiz(latestQuiz);
-      setQuizQuestions(filteredQuestions);
-      setViewMode("detail");
-    } catch (error) {
-      console.error(error);
-      toast.error("Gagal mengambil detail kuis");
-    }
-  };
-
-  const [quizzes, setQuizzes] = useState<any[]>([]);
 
   useEffect(() => {
     const fetchQuizzes = async () => {
@@ -819,21 +234,6 @@ export function QuizPage() {
     fetchQuizzes();
   }, []);
 
-  // For drag and drop
-  const [dragItems, setDragItems] = useState<string[]>([]);
-
-  // For matching
-  const [selectedLeft, setSelectedLeft] = useState<number | null>(null);
-  const [matches, setMatches] = useState<Record<number, number>>({});
-
-  // For logic flow
-  const [logicAnswers, setLogicAnswers] = useState<string[]>([]);
-
-  // For simulation
-  const [simulationSteps, setSimulationSteps] = useState<string[]>([]);
-  const [simulationRun, setSimulationRun] = useState(false);
-
-  // Timer countdown
   useEffect(() => {
     if (viewMode === "quiz" && timeLeft > 0) {
       const timer = setInterval(() => {
@@ -845,9 +245,83 @@ export function QuizPage() {
           return prev - 1;
         });
       }, 1000);
+
       return () => clearInterval(timer);
     }
   }, [viewMode, timeLeft]);
+
+  const handleStartQuiz = async (quiz: any) => {
+    if (!isQuizAllowed(quiz)) {
+      toast.error("Kuis ini tidak tersedia untuk siswa.");
+      return;
+    }
+
+    try {
+      const token = localStorage.getItem("token");
+
+      const detailRes = await fetch(`http://localhost:5000/api/student/quizzes/${quiz.id}`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      if (!detailRes.ok) {
+        throw new Error("Gagal mengambil status quiz");
+      }
+
+      const latestQuiz = await detailRes.json();
+
+      if (latestQuiz.submissionStatus === "submitted" || latestQuiz.submissionStatus === "graded" || latestQuiz.submissionId) {
+        const hasEssaySubmission = latestQuiz.submissionStatus === "submitted";
+
+        setSelectedQuiz(latestQuiz);
+        setQuizResult({
+          score: latestQuiz.totalScore ?? 0,
+          correct: 0,
+          total: latestQuiz.totalQuestions ?? 0,
+          totalPoints: latestQuiz.totalPoints ?? 0,
+          earnedPoints: 0,
+          hasEssay: hasEssaySubmission,
+        });
+        setViewMode("result");
+        return;
+      }
+
+      const res = await fetch(`http://localhost:5000/api/student/quizzes/${quiz.id}/questions`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      if (!res.ok) {
+        const errText = await res.text();
+        console.error("GET QUESTIONS ERROR:", errText);
+        throw new Error("Gagal mengambil detail kuis");
+      }
+
+      const data = await res.json();
+
+      const filteredQuestions = data
+        .filter((q: any) => q.type === "multiple-choice" || q.type === "essay")
+        .map((q: any) => ({
+          id: q.id,
+          type: q.type,
+          question: q.questionText,
+          points: q.points ?? 10,
+          difficulty: q.payload?.difficulty ?? "Sedang",
+          options: q.options?.map((opt: any) => opt.optionText) || [],
+          optionIds: q.options?.map((opt: any) => opt.id) || [],
+          correctAnswer: q.options?.findIndex((opt: any) => opt.isCorrect) ?? 0,
+        }));
+
+      setSelectedQuiz(latestQuiz);
+      setQuizQuestions(filteredQuestions);
+      setViewMode("detail");
+    } catch (error) {
+      console.error(error);
+      toast.error("Gagal mengambil detail kuis");
+    }
+  };
 
   const handleBeginQuiz = () => {
     if (selectedQuiz) {
@@ -864,6 +338,8 @@ export function QuizPage() {
 
       const questions = quizQuestions;
       const firstQ = questions[0];
+
+      if (!firstQ) return;
 
       if (firstQ.type === "drag-drop") {
         setDragItems([...(firstQ as DragDropQuestion).items]);
@@ -911,10 +387,10 @@ export function QuizPage() {
     if (!selectedQuiz) return;
 
     const questions = quizQuestions;
-
     const currentQ = questions[currentQuestion];
 
-    // Save current answer
+    if (!currentQ) return;
+
     if (currentQ.type === "drag-drop") {
       handleAnswerChange(currentQ.id, [...dragItems]);
     } else if (currentQ.type === "matching") {
@@ -952,8 +428,9 @@ export function QuizPage() {
     if (!selectedQuiz) return;
 
     const questions = quizQuestions;
-
     const currentQ = questions[currentQuestion];
+
+    if (!currentQ) return;
 
     if (currentQ.type === "drag-drop") {
       handleAnswerChange(currentQ.id, [...dragItems]);
@@ -994,23 +471,30 @@ export function QuizPage() {
     const questions = quizQuestions;
     const currentQ = questions[currentQuestion];
 
-    if (currentQ.type === "drag-drop") {
-      handleAnswerChange(currentQ.id, [...dragItems]);
-    } else if (currentQ.type === "matching") {
-      handleAnswerChange(currentQ.id, { ...matches });
-    } else if (currentQ.type === "logic-flow") {
-      handleAnswerChange(currentQ.id, [...logicAnswers]);
-    } else if (currentQ.type === "simulation") {
-      handleAnswerChange(currentQ.id, [...simulationSteps]);
+    if (currentQ) {
+      if (currentQ.type === "drag-drop") {
+        handleAnswerChange(currentQ.id, [...dragItems]);
+      } else if (currentQ.type === "matching") {
+        handleAnswerChange(currentQ.id, { ...matches });
+      } else if (currentQ.type === "logic-flow") {
+        handleAnswerChange(currentQ.id, [...logicAnswers]);
+      } else if (currentQ.type === "simulation") {
+        handleAnswerChange(currentQ.id, [...simulationSteps]);
+      }
     }
 
-    const hasEssay = questions.some((q) => q.type === "essay");
+    const token = localStorage.getItem("token");
+
+    const essayQuestions = questions.filter((q) => q.type === "essay");
+    const mcQuestions = questions.filter((q) => q.type === "multiple-choice") as MultipleChoiceQuestion[];
+
+    const hasEssay = essayQuestions.length > 0;
+    const hasMC = mcQuestions.length > 0;
 
     if (hasEssay) {
       try {
-        const token = localStorage.getItem("token");
-        const essayAnswers = questions
-          .filter((q) => q.type === "essay" && answers[q.id]?.trim())
+        const essayAnswers = essayQuestions
+          .filter((q) => answers[q.id]?.trim())
           .map((q) => ({
             questionId: q.id,
             answerText: answers[q.id].trim(),
@@ -1056,6 +540,7 @@ export function QuizPage() {
           prev
             ? {
                 ...prev,
+                submissionId: data.submission?.id ?? true,
                 submissionStatus: "submitted",
                 submittedAt: data.submission?.submittedAt || new Date().toISOString(),
                 totalScore: null,
@@ -1081,69 +566,102 @@ export function QuizPage() {
       }
     }
 
-    let correct = 0;
-    let earnedPoints = 0;
-    let totalPoints = 0;
+    if (hasMC) {
+      try {
+        const mcAnswers = mcQuestions
+          .filter((q) => answers[q.id] !== undefined && answers[q.id] !== null)
+          .map((q) => {
+            const selectedIndex = answers[q.id];
+            const selectedOptionId = q.optionIds?.[selectedIndex];
 
-    questions.forEach((q) => {
-      totalPoints += q.points;
+            return {
+              questionId: q.id,
+              selectedOptionId,
+            };
+          })
+          .filter((item) => item.selectedOptionId);
 
-      if (q.type === "multiple-choice") {
-        if (answers[q.id] === q.correctAnswer) {
-          correct++;
-          earnedPoints += q.points;
+        if (mcAnswers.length !== mcQuestions.length) {
+          toast.error("Masih ada soal pilihan ganda yang belum dijawab");
+          return;
         }
-      } else if (q.type === "drag-drop") {
-        const userAnswer = answers[q.id] || [];
-        const correctSequence = q.correctOrder.map((i) => q.items[i]);
-        const isCorrect = JSON.stringify(userAnswer) === JSON.stringify(correctSequence);
-        if (isCorrect) {
-          correct++;
-          earnedPoints += q.points;
+
+        const res = await fetch(`http://localhost:5000/api/student/quizzes/${selectedQuiz.id}/submit-mc`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            answers: mcAnswers,
+          }),
+        });
+
+        const data = await res.json();
+
+        if (!res.ok) {
+          throw new Error(data.message || "Gagal submit quiz pilihan ganda");
         }
-      } else if (q.type === "matching") {
-        const userMatches = answers[q.id] || {};
-        const allCorrect = Object.keys(q.correctMatches).every((key) => userMatches[key] === q.correctMatches[parseInt(key)]);
-        if (allCorrect) {
-          correct++;
-          earnedPoints += q.points;
-        }
-      } else if (q.type === "logic-flow") {
-        const userAnswers = answers[q.id] || [];
-        const allCorrect = q.correctAnswers.every((ans, idx) => userAnswers[idx] === q.options[ans]);
-        if (allCorrect) {
-          correct++;
-          earnedPoints += q.points;
-        }
-      } else if (q.type === "debugging") {
-        if (answers[q.id] === q.correctAnswer) {
-          correct++;
-          earnedPoints += q.points;
-        }
-      } else if (q.type === "simulation") {
-        const userAnswer = answers[q.id] || [];
-        const correctSequence = q.correctOrder.map((i) => q.steps[i]);
-        const isCorrect = JSON.stringify(userAnswer) === JSON.stringify(correctSequence);
-        if (isCorrect) {
-          correct++;
-          earnedPoints += q.points;
-        }
+
+        const backendScore = Number(data.score ?? data.submission?.total_score ?? 0);
+
+        let totalPoints = 0;
+        let earnedPoints = 0;
+        let correct = 0;
+
+        mcQuestions.forEach((q) => {
+          totalPoints += q.points;
+          if (answers[q.id] === q.correctAnswer) {
+            correct++;
+            earnedPoints += q.points;
+          }
+        });
+
+        setQuizzes((prev) =>
+          prev.map((q) =>
+            q.id === selectedQuiz.id
+              ? {
+                  ...q,
+                  submissionId: data.submission?.id ?? true,
+                  submissionStatus: "graded",
+                  submittedAt: data.submission?.submitted_at || new Date().toISOString(),
+                  totalScore: backendScore,
+                }
+              : q
+          )
+        );
+
+        setSelectedQuiz((prev: any) =>
+          prev
+            ? {
+                ...prev,
+                submissionId: data.submission?.id ?? true,
+                submissionStatus: "graded",
+                submittedAt: data.submission?.submitted_at || new Date().toISOString(),
+                totalScore: backendScore,
+              }
+            : prev
+        );
+
+        setQuizResult({
+          score: backendScore,
+          correct,
+          total: mcQuestions.length,
+          totalPoints,
+          earnedPoints,
+          hasEssay: false,
+        });
+
+        setShowSuccess(true);
+        setViewMode("result");
+        toast.success("Kuis berhasil diselesaikan!");
+        return;
+      } catch (error: any) {
+        console.error(error);
+        toast.error(error.message || "Gagal submit quiz pilihan ganda");
+        return;
       }
-    });
-
-    const score = totalPoints > 0 ? Math.round((earnedPoints / totalPoints) * 100) : 0;
-
-    setQuizResult({
-      score,
-      correct,
-      total: questions.length,
-      totalPoints,
-      earnedPoints,
-      hasEssay: false,
-    });
-
-    setViewMode("result");
-    toast.success("Kuis berhasil diselesaikan!");
+    }
   };
 
   const formatTime = (seconds: number) => {
@@ -1152,25 +670,11 @@ export function QuizPage() {
     return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
   };
 
-  const getLevelColor = (level: string) => {
-    switch (level) {
-      case "Beginner":
-        return "bg-green-500 hover:bg-green-600";
-      case "Intermediate":
-        return "bg-blue-500 hover:bg-blue-600";
-      case "Expert":
-        return "bg-purple-500 hover:bg-purple-600";
-      default:
-        return "bg-gray-500 hover:bg-gray-600";
-    }
-  };
-
-  // LIST VIEW
   const successToast = showSuccess ? (
     <div className="fixed top-6 right-6 z-[9999] max-w-md rounded-xl bg-green-500 px-5 py-3 text-white shadow-lg">
       <div className="flex items-center gap-3">
         <span className="flex h-7 w-7 items-center justify-center rounded-full bg-white/20 font-bold">✓</span>
-        <p className="font-medium">Kuis berhasil dikumpulkan! Menunggu penilaian guru.</p>
+        <p className="font-medium">Kuis berhasil dikumpulkan!</p>
       </div>
     </div>
   ) : null;
@@ -1310,7 +814,6 @@ export function QuizPage() {
     );
   }
 
-  // DETAIL VIEW
   if (viewMode === "detail" && selectedQuiz) {
     const questions = quizQuestions;
 
@@ -1423,24 +926,52 @@ export function QuizPage() {
               </CardContent>
             </Card>
 
-            {isSubmittedEssayQuiz(selectedQuiz) ? (
-              <Button
-                className="w-full bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700 gap-2 h-12"
-                onClick={() => {
-                  setQuizResult({
-                    score: 0,
-                    correct: 0,
-                    total: selectedQuiz.totalQuestions ?? 0,
-                    totalPoints: selectedQuiz.totalPoints ?? 0,
-                    earnedPoints: 0,
-                    hasEssay: true,
-                  });
-                  setViewMode("result");
-                }}
-              >
-                <Clock className="w-5 h-5" />
-                Lihat Status Kuis
-              </Button>
+            {selectedQuiz.submissionStatus === "graded" ? (
+              <div className="space-y-3">
+                <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-700">
+                  Kuis ini sudah dinilai.
+                  {selectedQuiz.totalScore !== null && selectedQuiz.totalScore !== undefined ? ` Skor kamu: ${selectedQuiz.totalScore}` : ""}
+                </div>
+                <Button
+                  className="w-full bg-gradient-to-r from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700 gap-2 h-12"
+                  onClick={() => {
+                    setQuizResult({
+                      score: selectedQuiz.totalScore ?? 0,
+                      correct: 0,
+                      total: selectedQuiz.totalQuestions ?? 0,
+                      totalPoints: selectedQuiz.totalPoints ?? 0,
+                      earnedPoints: 0,
+                      hasEssay: false,
+                    });
+                    setViewMode("result");
+                  }}
+                >
+                  <Award className="w-5 h-5" />
+                  Lihat Hasil
+                </Button>
+              </div>
+            ) : selectedQuiz.submissionStatus === "submitted" || selectedQuiz.submissionId ? (
+              <div className="space-y-3">
+                <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-700">Kuis ini sudah pernah dikerjakan dan sedang menunggu penilaian guru. Kuis hanya bisa dikerjakan 1 kali.</div>
+                <Button
+                  variant="outline"
+                  className="w-full gap-2 h-12"
+                  onClick={() => {
+                    setQuizResult({
+                      score: 0,
+                      correct: 0,
+                      total: selectedQuiz.totalQuestions ?? 0,
+                      totalPoints: selectedQuiz.totalPoints ?? 0,
+                      earnedPoints: 0,
+                      hasEssay: true,
+                    });
+                    setViewMode("result");
+                  }}
+                >
+                  <Clock className="w-5 h-5" />
+                  Lihat Status Kuis
+                </Button>
+              </div>
             ) : (
               <Button className="w-full bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 gap-2 h-12" onClick={handleBeginQuiz}>
                 <Play className="w-5 h-5" />
@@ -1453,17 +984,17 @@ export function QuizPage() {
     );
   }
 
-  // QUIZ VIEW - will continue in next message due to length
   if (viewMode === "quiz" && selectedQuiz) {
     const questions = quizQuestions;
     const progress = ((currentQuestion + 1) / questions.length) * 100;
     const currentQ = questions[currentQuestion];
 
+    if (!currentQ) return null;
+
     return (
       <div className="fixed inset-0 z-50 bg-[#eef5ff] overflow-auto">
         <DndProvider backend={HTML5Backend}>
           <div className="max-w-5xl mx-auto p-6 space-y-6">
-            {/* HEADER */}
             <div className="flex justify-between items-center">
               <h2 className="text-xl font-bold text-gray-800">{selectedQuiz.title}</h2>
 
@@ -1485,7 +1016,6 @@ export function QuizPage() {
               </Button>
             </div>
 
-            {/* TIMER + PROGRESS */}
             <Card className="bg-gradient-to-r from-blue-500 to-purple-600 text-white shadow-lg">
               <CardContent className="p-4">
                 <div className="flex justify-between mb-2">
@@ -1506,19 +1036,16 @@ export function QuizPage() {
               </CardContent>
             </Card>
 
-            {/* QUESTION */}
             <Card>
               <CardContent className="p-6 space-y-6">
                 <div className="flex items-center gap-2">
                   <Badge>Soal {currentQuestion + 1}</Badge>
                   <Badge variant="secondary">{currentQ.difficulty}</Badge>
-
                   <Badge className="ml-auto bg-yellow-400 text-black">{currentQ.points} poin</Badge>
                 </div>
 
                 <p className="text-lg font-semibold text-gray-800 mb-2">{currentQ.question}</p>
 
-                {/* MULTIPLE CHOICE */}
                 {currentQ.type === "multiple-choice" && (
                   <div className="space-y-3">
                     {currentQ.options.map((option: string, i: number) => {
@@ -1528,8 +1055,7 @@ export function QuizPage() {
                         <div
                           key={i}
                           onClick={() => setAnswers({ ...answers, [currentQ.id]: i })}
-                          className={`p-4 border rounded-lg cursor-pointer transition
-                          ${selected ? "border-blue-500 bg-blue-50" : "border-gray-200 hover:border-blue-300"}`}
+                          className={`p-4 border rounded-lg cursor-pointer transition ${selected ? "border-blue-500 bg-blue-50" : "border-gray-200 hover:border-blue-300"}`}
                         >
                           {option}
                         </div>
@@ -1538,7 +1064,6 @@ export function QuizPage() {
                   </div>
                 )}
 
-                {/* ESSAY */}
                 {currentQ.type === "essay" && (
                   <Textarea
                     value={answers[currentQ.id] || ""}
@@ -1554,14 +1079,13 @@ export function QuizPage() {
               </CardContent>
             </Card>
 
-            {/* NAVIGATION */}
             <div className="flex justify-between">
-              <Button variant="outline" disabled={currentQuestion === 0} onClick={() => setCurrentQuestion(currentQuestion - 1)}>
+              <Button variant="outline" disabled={currentQuestion === 0} onClick={handlePrevQuestion}>
                 Sebelumnya
               </Button>
 
               {currentQuestion < questions.length - 1 ? (
-                <Button onClick={() => setCurrentQuestion(currentQuestion + 1)}>Selanjutnya</Button>
+                <Button onClick={handleNextQuestion}>Selanjutnya</Button>
               ) : (
                 <Button className="bg-green-600 hover:bg-green-700" onClick={handleSubmitQuiz}>
                   Selesai
@@ -1574,10 +1098,7 @@ export function QuizPage() {
     );
   }
 
-  // RESULT VIEW
-
   if (viewMode === "result" && quizResult && selectedQuiz) {
-    // If quiz has essay questions, show pending grading message
     if (quizResult.hasEssay) {
       return (
         <>
@@ -1663,6 +1184,7 @@ export function QuizPage() {
               onClick={() => {
                 setViewMode("list");
                 setSelectedQuiz(null);
+                setQuizResult(null);
               }}
             >
               Kembali ke Daftar Kuis
@@ -1672,7 +1194,6 @@ export function QuizPage() {
       );
     }
 
-    // Normal result view for auto-graded quizzes
     const isPassed = quizResult.score >= 70;
 
     return (
@@ -1680,9 +1201,10 @@ export function QuizPage() {
         {showSuccess && (
           <div className="fixed top-6 right-6 z-50 flex items-center gap-3 bg-green-500 text-white px-5 py-3 rounded-xl shadow-lg animate-in fade-in slide-in-from-top-2 duration-300">
             <span className="flex h-6 w-6 items-center justify-center rounded-full bg-white/20">✓</span>
-            <span className="font-medium">Kuis berhasil dikumpulkan! Menunggu penilaian guru.</span>
+            <span className="font-medium">Kuis berhasil diselesaikan!</span>
           </div>
         )}
+
         <div className="space-y-6">
           <Card className={`${isPassed ? "bg-gradient-to-br from-green-500 to-emerald-600" : "bg-gradient-to-br from-blue-500 to-indigo-600"} text-white`}>
             <CardContent className="pt-8 pb-8 text-center">
@@ -1727,12 +1249,10 @@ export function QuizPage() {
               onClick={() => {
                 setViewMode("list");
                 setSelectedQuiz(null);
+                setQuizResult(null);
               }}
             >
               Kembali ke Daftar Kuis
-            </Button>
-            <Button className="flex-1 bg-gradient-to-r from-blue-500 to-purple-500 hover:from-blue-600 hover:to-purple-600" onClick={handleBeginQuiz}>
-              Kerjakan Ulang
             </Button>
           </div>
         </div>
