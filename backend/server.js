@@ -1288,22 +1288,33 @@ app.post("/api/quizzes", authenticateToken, authorizeRole(["guru"]), async (req,
     const result = await pool.query(
       `
       INSERT INTO quizzes
-      (title, kelas, description, total_questions, duration, question_types, status, created_by)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+      (title, kelas, description, total_questions, duration, question_types, status, created_by, kkm)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
       RETURNING
-        id,
+      id,
+      title,
+      kelas,
+      description,
+      total_questions AS "totalQuestions",
+      duration,
+      question_types AS "questionTypes",
+      status,
+      created_at AS "createdAt",
+      kkm,
+      0 AS submissions,
+      0 AS "averageScore"
+      `,
+      [
         title,
         kelas,
         description,
-        total_questions AS "totalQuestions",
+        totalQuestions,
         duration,
-        question_types AS "questionTypes",
-        status,
-        created_at AS "createdAt",
-        0 AS submissions,
-        0 AS "averageScore"
-      `,
-      [title, kelas, description, totalQuestions, duration, JSON.stringify(questionTypes || []), status || "draft", req.user.id]
+        JSON.stringify(questionTypes || []),
+        status || "draft",
+        req.user.id,
+        kkm || 75, // default kalau kosong
+      ]
     );
 
     res.json(result.rows[0]);
@@ -1316,7 +1327,7 @@ app.post("/api/quizzes", authenticateToken, authorizeRole(["guru"]), async (req,
 app.put("/api/quizzes/:id", authenticateToken, authorizeRole(["guru"]), async (req, res) => {
   try {
     const { id } = req.params;
-    const { title, kelas, description, totalQuestions, duration, questionTypes, status } = req.body;
+    const { title, kelas, description, totalQuestions, duration, questionTypes, status, kkm } = req.body;
 
     const result = await pool.query(
       `
@@ -1327,9 +1338,10 @@ app.put("/api/quizzes/:id", authenticateToken, authorizeRole(["guru"]), async (r
           total_questions = $4,
           duration = $5,
           question_types = $6,
-          status = $7
-      WHERE id = $8
-      AND created_by = $9
+          status = $7,
+          kkm = $8
+      WHERE id = $9
+        AND created_by = $10
       RETURNING
         id,
         title,
@@ -1340,10 +1352,11 @@ app.put("/api/quizzes/:id", authenticateToken, authorizeRole(["guru"]), async (r
         question_types AS "questionTypes",
         status,
         created_at AS "createdAt",
+        kkm,
         0 AS submissions,
         0 AS "averageScore"
       `,
-      [title, kelas, description, totalQuestions, duration, JSON.stringify(questionTypes || []), status, id, req.user.id]
+      [title, kelas, description, totalQuestions, duration, JSON.stringify(questionTypes || []), status, kkm || 75, id, req.user.id]
     );
 
     if (result.rows.length === 0) {
@@ -4662,6 +4675,7 @@ app.get("/api/student/grades/overview", authenticateToken, authorizeRole(["siswa
         q.title,
         q.description,
         q.created_at,
+        q.question_types,
         qs.submitted_at,
         qs.status,
         COALESCE(qs.total_score, 0) AS total_score,
@@ -4677,15 +4691,46 @@ app.get("/api/student/grades/overview", authenticateToken, authorizeRole(["siswa
       [siswaId]
     );
 
-    const quizGrades = quizResult.rows.map((row, index) => ({
-      id: row.submission_id || `quiz-${index + 1}`,
-      title: row.title,
-      score: Number(row.total_score || 0),
-      date: row.submitted_at || row.created_at,
-      category: "Quiz",
-      teacher: row.teacher_name || "-",
-      status: row.status || "submitted",
-    }));
+    const quizGrades = quizResult.rows.map((row, index) => {
+      let parsedTypes = [];
+
+      try {
+        if (Array.isArray(row.question_types)) {
+          parsedTypes = row.question_types;
+        } else if (typeof row.question_types === "string") {
+          parsedTypes = JSON.parse(row.question_types);
+        }
+      } catch (e) {
+        parsedTypes = [];
+      }
+
+      let quizType = "mcq";
+
+      if (parsedTypes.includes("essay")) {
+        quizType = "essay";
+      } else if (parsedTypes.includes("multiple-choice") || parsedTypes.includes("mcq") || parsedTypes.includes("pilihan-ganda")) {
+        quizType = "mcq";
+      }
+
+      return {
+        id: row.submission_id || `quiz-${index + 1}`,
+        title: row.title,
+        score: Number(row.total_score || 0),
+        date: row.submitted_at || row.created_at,
+        category: "Quiz",
+        teacher: row.teacher_name || "-",
+        status: row.status || "submitted",
+        type: quizType,
+      };
+    });
+
+    const mcqScores = quizGrades.filter((q) => q.type === "mcq").map((q) => Number(q.score || 0));
+
+    const essayScores = quizGrades.filter((q) => q.type === "essay").map((q) => Number(q.score || 0));
+
+    const averageMcq = mcqScores.length > 0 ? Number((mcqScores.reduce((a, b) => a + b, 0) / mcqScores.length).toFixed(2)) : 0;
+
+    const averageEssay = essayScores.length > 0 ? Number((essayScores.reduce((a, b) => a + b, 0) / essayScores.length).toFixed(2)) : 0;
 
     const projectResult = await pool.query(
       `
@@ -4759,14 +4804,12 @@ app.get("/api/student/grades/overview", authenticateToken, authorizeRole(["siswa
 
     const quizScores = quizGrades.map((item) => Number(item.score || 0));
     const projectScores = pblGrades.map((item) => Number(item.score || 0));
-    const allScores = [...quizScores, ...projectScores];
 
-    const averageScore = allScores.length > 0 ? Number((allScores.reduce((sum, n) => sum + n, 0) / allScores.length).toFixed(1)) : 0;
+    const averageQuiz = quizScores.length > 0 ? Number((quizScores.reduce((sum, n) => sum + n, 0) / quizScores.length).toFixed(2)) : 0;
 
-    const averageQuiz = quizScores.length > 0 ? Number((quizScores.reduce((sum, n) => sum + n, 0) / quizScores.length).toFixed(1)) : 0;
+    const averageProject = projectScores.length > 0 ? Number((projectScores.reduce((sum, n) => sum + n, 0) / projectScores.length).toFixed(2)) : 0;
 
-    const averageProject = projectScores.length > 0 ? Number((projectScores.reduce((sum, n) => sum + n, 0) / projectScores.length).toFixed(1)) : 0;
-
+    const averageScore = Math.round(averageQuiz * 0.4 + averageProject * 0.6);
     let ranking = "-";
     if (averageScore >= 90) ranking = "Top 5%";
     else if (averageScore >= 85) ranking = "Top 10%";
@@ -4796,10 +4839,15 @@ app.get("/api/student/grades/overview", authenticateToken, authorizeRole(["siswa
       .sort((a, b) => monthOrder.indexOf(a.month) - monthOrder.indexOf(b.month));
 
     const weightageData = [
-      { name: "Kuis", value: 30, color: "#3b82f6" },
-      { name: "Proyek PBL", value: 40, color: "#8b5cf6" },
-      { name: "Ujian Akhir", value: 30, color: "#10b981" },
+      { name: "Kuis", value: 40, color: "#3b82f6" },
+      { name: "Proyek PBL", value: 60, color: "#8b5cf6" },
     ];
+
+    console.log("QUIZ SCORES:", quizScores);
+    console.log("PROJECT SCORES:", projectScores);
+    console.log("averageQuiz:", averageQuiz);
+    console.log("averageProject:", averageProject);
+    console.log("averageScore:", averageScore);
 
     res.json({
       student: {
@@ -4812,6 +4860,8 @@ app.get("/api/student/grades/overview", authenticateToken, authorizeRole(["siswa
         averageScore,
         averageQuiz,
         averageProject,
+        averageMcq,
+        averageEssay,
         ranking,
         targetSemester: 95.0,
       },
@@ -4963,11 +5013,39 @@ app.get("/api/guru/students/grade-summary", authenticateToken, authorizeRole(["g
 
     const result = await pool.query(
       `
-      WITH teacher_quizzes AS (
+      WITH class_kkm AS (
+        SELECT
+          q.kelas,
+          q.kkm,
+          ROW_NUMBER() OVER (
+            PARTITION BY q.kelas
+            ORDER BY q.created_at DESC
+          ) AS rn
+        FROM quizzes q
+        WHERE q.created_by = $1
+          AND q.kkm IS NOT NULL
+      ),
+      teacher_quizzes AS (
         SELECT
           qs.student_id,
+
           AVG(COALESCE(qs.total_score, 0))::numeric(10,2) AS avg_quiz,
-          COUNT(qs.id)::int AS quiz_count
+          COUNT(qs.id)::int AS quiz_count,
+
+          AVG(
+            CASE
+              WHEN q.question_types::jsonb ? 'Multiple Choice'
+              THEN COALESCE(qs.total_score, 0)
+            END
+          ) AS avg_mcq,
+          
+          AVG(
+            CASE
+              WHEN q.question_types::jsonb ? 'Essay'
+              THEN COALESCE(qs.total_score, 0)
+            END
+          ) AS avg_essay
+
         FROM quiz_submissions qs
         JOIN quizzes q
           ON q.id = qs.quiz_id
@@ -5015,6 +5093,8 @@ app.get("/api/guru/students/grade-summary", authenticateToken, authorizeRole(["g
         ts.nis,
         ts.kelas AS class,
         COALESCE(tq.avg_quiz, 0)::float AS "quizAvg",
+        COALESCE(tq.avg_mcq, 0)::float AS "averageMcq",
+        COALESCE(tq.avg_essay, 0)::float AS "averageEssay",
         COALESCE(tp.avg_project, 0)::float AS "projectAvg",
         ROUND(
           (
@@ -5024,27 +5104,38 @@ app.get("/api/guru/students/grade-summary", authenticateToken, authorizeRole(["g
           0
         )::float AS overall,
         COALESCE(tq.quiz_count, 0)::int AS quizzes,
-        COALESCE(tp.project_count, 0)::int AS projects
+        COALESCE(tp.project_count, 0)::int AS projects,
+        ck.kkm::float AS kkm
       FROM teacher_students ts
       LEFT JOIN teacher_quizzes tq
         ON tq.student_id = ts.id
       LEFT JOIN teacher_projects tp
         ON tp.student_id = ts.id
+      LEFT JOIN class_kkm ck
+        ON ck.kelas = ts.kelas
+       AND ck.rn = 1
       ORDER BY ts.kelas ASC, ts.nama ASC
       `,
       [teacherId, kelas || null]
     );
 
-    const students = result.rows.map((student) => ({
-      ...student,
-      avatar: student.name
-        .split(" ")
-        .map((word) => word[0])
-        .join("")
-        .slice(0, 2)
-        .toUpperCase(),
-      trend: "stable",
-    }));
+    const students = result.rows.map((student) => {
+      const overall = Number(student.overall || 0);
+      const kkm = student.kkm !== null ? Number(student.kkm) : null;
+
+      return {
+        ...student,
+        kkm,
+        isPassed: kkm !== null ? overall >= kkm : false,
+        avatar: student.name
+          .split(" ")
+          .map((word) => word[0])
+          .join("")
+          .slice(0, 2)
+          .toUpperCase(),
+        trend: "stable",
+      };
+    });
 
     res.json(students);
   } catch (err) {
@@ -5056,38 +5147,87 @@ app.get("/api/guru/students/grade-summary", authenticateToken, authorizeRole(["g
   }
 });
 
+app.get("/api/student/grade-summary", authenticateToken, async (req, res) => {
+  try {
+    const studentId = req.user.id;
+
+    const result = await pool.query(
+      `
+      SELECT 
+        u.id,
+        u.name,
+        u.nis,
+
+        COALESCE(tq.avg_quiz, 0) AS "quizAvg",
+        COALESCE(tp.avg_project, 0) AS "projectAvg",
+
+        ROUND(
+          (COALESCE(tq.avg_quiz, 0) * 0.4) +
+          (COALESCE(tp.avg_project, 0) * 0.6)
+        ) AS "overall",
+
+        q.kkm
+
+      FROM users u
+
+      LEFT JOIN (
+        SELECT student_id, AVG(score) AS avg_quiz
+        FROM quiz_submissions
+        GROUP BY student_id
+      ) tq ON tq.student_id = u.id
+
+      LEFT JOIN (
+        SELECT student_id, AVG(score) AS avg_project
+        FROM project_submissions
+        GROUP BY student_id
+      ) tp ON tp.student_id = u.id
+
+      LEFT JOIN quizzes q ON q.kelas = u.kelas
+
+      WHERE u.id = $1
+    `,
+      [studentId]
+    );
+
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.get("/api/guru/teaching-classes", authenticateToken, authorizeRole(["guru"]), async (req, res) => {
   try {
     const teacherId = req.user.id;
 
-    const result = await pool.query(
+    const quizResult = await pool.query(
       `
-      WITH quiz_classes AS (
-        SELECT DISTINCT q.kelas AS kelas
-        FROM quizzes q
-        WHERE q.created_by = $1
-          AND q.kelas IS NOT NULL
-      ),
-      project_classes AS (
-        SELECT DISTINCT k.nama AS kelas
-        FROM projects p
-        JOIN kelas k
-          ON k.id = p.class_id
-        WHERE p.created_by = $1
-      )
       SELECT DISTINCT kelas
-      FROM (
-        SELECT kelas FROM quiz_classes
-        UNION
-        SELECT kelas FROM project_classes
-      ) x
-      WHERE kelas IS NOT NULL
-      ORDER BY kelas ASC
+      FROM quizzes
+      WHERE created_by = $1
+        AND kelas IS NOT NULL
       `,
       [teacherId]
     );
 
-    res.json(result.rows);
+    const projectResult = await pool.query(
+      `
+      SELECT DISTINCT k.nama AS kelas
+      FROM projects p
+      JOIN kelas k ON k.id = p.class_id
+      WHERE p.created_by = $1
+      `,
+      [teacherId]
+    );
+
+    const kelasSet = new Set([...quizResult.rows.map((row) => row.kelas), ...projectResult.rows.map((row) => row.kelas)]);
+
+    const kelasList = Array.from(kelasSet)
+      .filter(Boolean)
+      .sort()
+      .map((kelas) => ({ kelas }));
+
+    res.json(kelasList);
   } catch (err) {
     console.error("GET TEACHING CLASSES ERROR:", err);
     res.status(500).json({
@@ -5096,7 +5236,6 @@ app.get("/api/guru/teaching-classes", authenticateToken, authorizeRole(["guru"])
     });
   }
 });
-
 // ================= SUBMIT MULTIPLE CHOICE =================
 app.post("/api/student/quizzes/:quizId/submit-mc", authenticateToken, authorizeRole(["siswa"]), async (req, res) => {
   const client = await pool.connect();
@@ -5185,6 +5324,43 @@ app.post("/api/student/quizzes/:quizId/submit-mc", authenticateToken, authorizeR
     res.status(500).json({ error: err.message });
   } finally {
     client.release();
+  }
+});
+
+// KKM
+
+app.get("/api/guru/kkm", authenticateToken, authorizeRole(["guru"]), async (req, res) => {
+  try {
+    const teacherId = req.user.id;
+    const { kelas } = req.query;
+
+    const result = await pool.query(
+      `
+      SELECT kkm, kkm_active
+      FROM quizzes
+      WHERE created_by = $1
+        AND ($2::text IS NULL OR kelas = $2)
+        AND kkm IS NOT NULL
+      ORDER BY created_at DESC
+      LIMIT 1
+      `,
+      [teacherId, kelas || null]
+    );
+
+    if (result.rows.length === 0) {
+      return res.json({
+        kkm: null,
+        active: false,
+      });
+    }
+
+    res.json({
+      kkm: Number(result.rows[0].kkm),
+      active: Boolean(result.rows[0].kkm_active),
+    });
+  } catch (err) {
+    console.error("GET KKM ERROR:", err);
+    res.status(500).json({ message: "Gagal mengambil KKM", error: err.message });
   }
 });
 

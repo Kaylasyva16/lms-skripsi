@@ -7,6 +7,7 @@ import { Input } from "../ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/tabs";
 import { FileBarChart, Download, Search, Filter, TrendingUp, Award, Users, ChevronRight } from "lucide-react";
+import * as XLSX from "xlsx";
 
 interface TeacherGradesProps {
   onNavigate: (page: string) => void;
@@ -26,6 +27,10 @@ interface StudentGradeSummary {
   projects: number;
   avatar: string;
   trend: "stable" | "up" | "down";
+  kkm: number | null;
+  isPassed: boolean;
+  averageMcq?: number;
+  averageEssay?: number;
 }
 
 interface TeachingClassItem {
@@ -119,13 +124,48 @@ export default function TeacherGrades({ onNavigate, onLogout, onViewStudentGrade
     });
   }, [students, searchQuery]);
 
+  const handleExportGrades = () => {
+    if (filteredStudents.length === 0) {
+      alert("Tidak ada data nilai untuk diexport");
+      return;
+    }
+
+    const exportData = filteredStudents.map((student, index) => ({
+      No: index + 1,
+      Nama: student.name,
+      NIS: student.nis,
+      Kelas: student.class,
+      "Nilai Akhir": student.overall,
+      Grade: getGradeLetter(student.overall),
+      "Quiz Pilihan Ganda": Number(student.averageMcq || 0),
+      "Quiz Essay": Number(student.averageEssay || 0),
+      "Rata-rata Proyek": student.projectAvg,
+      "Jumlah Quiz": student.quizzes,
+      "Jumlah Proyek": student.projects,
+      KKM: student.kkm ?? "-",
+      "Status KKM": student.kkm !== null && Number(student.overall || 0) >= Number(student.kkm) ? "Lulus" : "Belum Lulus",
+    }));
+
+    const worksheet = XLSX.utils.json_to_sheet(exportData);
+
+    worksheet["!cols"] = [{ wch: 6 }, { wch: 24 }, { wch: 14 }, { wch: 14 }, { wch: 14 }, { wch: 10 }, { wch: 18 }, { wch: 14 }, { wch: 18 }, { wch: 12 }, { wch: 14 }, { wch: 10 }, { wch: 16 }];
+
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Nilai Siswa");
+
+    const fileName = `nilai-siswa-${selectedClass === "all" ? "semua-kelas" : selectedClass}.xlsx`;
+    XLSX.writeFile(workbook, fileName);
+  };
   const summaryStats = useMemo(() => {
     const totalStudents = filteredStudents.length;
 
     const avgClass = totalStudents > 0 ? Number((filteredStudents.reduce((sum, student) => sum + Number(student.overall || 0), 0) / totalStudents).toFixed(1)) : 0;
 
-    const passCount = filteredStudents.filter((student) => Number(student.overall) >= 75).length;
-    const passRate = totalStudents > 0 ? Math.round((passCount / totalStudents) * 100) : 0;
+    const activeKkm = filteredStudents.length > 0 ? filteredStudents.find((student) => student.kkm !== null)?.kkm ?? null : null;
+
+    const passCount = activeKkm !== null ? filteredStudents.filter((student) => Number(student.overall || 0) >= activeKkm).length : 0;
+
+    const passRate = totalStudents > 0 && activeKkm !== null ? Math.round((passCount / totalStudents) * 100) : 0;
 
     const completionRate =
       totalStudents > 0
@@ -144,6 +184,8 @@ export default function TeacherGrades({ onNavigate, onLogout, onViewStudentGrade
       avgClass,
       passRate,
       completionRate,
+      kkm: activeKkm,
+      passCount,
     };
   }, [filteredStudents]);
 
@@ -213,7 +255,6 @@ export default function TeacherGrades({ onNavigate, onLogout, onViewStudentGrade
     <div className="flex min-h-screen bg-gradient-to-br from-blue-50 to-white">
       <div className="flex-1">
         <div className="p-8">
-          {/* Header */}
           <div className="flex items-center justify-between mb-8">
             <div>
               <h1 className="text-blue-900 mb-2 text-2xl font-semibold">Penilaian & Rapor</h1>
@@ -224,7 +265,7 @@ export default function TeacherGrades({ onNavigate, onLogout, onViewStudentGrade
                 <Filter className="w-4 h-4 mr-2" />
                 Filter
               </Button>
-              <Button className="bg-blue-500 hover:bg-blue-600">
+              <Button className="bg-blue-500 hover:bg-blue-600" onClick={handleExportGrades}>
                 <Download className="w-4 h-4 mr-2" />
                 Export Nilai
               </Button>
@@ -237,7 +278,6 @@ export default function TeacherGrades({ onNavigate, onLogout, onViewStudentGrade
             </Card>
           )}
 
-          {/* Stats */}
           <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
             <Card>
               <CardContent className="pt-6">
@@ -275,7 +315,7 @@ export default function TeacherGrades({ onNavigate, onLogout, onViewStudentGrade
                   </div>
                   <div>
                     <p className="text-2xl text-purple-700 font-semibold">{summaryStats.passRate}%</p>
-                    <p className="text-sm text-gray-600">Lulus KKM</p>
+                    <p className="text-sm text-gray-600">{summaryStats.kkm !== null ? `${summaryStats.passCount}/${summaryStats.totalStudents} siswa lulus KKM (${summaryStats.kkm})` : "KKM belum aktif"}</p>
                   </div>
                 </div>
               </CardContent>
@@ -296,7 +336,6 @@ export default function TeacherGrades({ onNavigate, onLogout, onViewStudentGrade
             </Card>
           </div>
 
-          {/* Main Content */}
           <Tabs defaultValue="students" className="space-y-6">
             <TabsList>
               <TabsTrigger value="students">Nilai Siswa</TabsTrigger>
@@ -304,7 +343,6 @@ export default function TeacherGrades({ onNavigate, onLogout, onViewStudentGrade
               <TabsTrigger value="analysis">Analisis</TabsTrigger>
             </TabsList>
 
-            {/* Students Tab */}
             <TabsContent value="students" className="space-y-6">
               <Card>
                 <CardHeader>
@@ -358,7 +396,7 @@ export default function TeacherGrades({ onNavigate, onLogout, onViewStudentGrade
                                   <span className="text-sm text-gray-600">NIS: {student.nis}</span>
                                 </div>
 
-                                <div className="grid md:grid-cols-4 gap-4">
+                                <div className="grid md:grid-cols-5 gap-4">
                                   <div className="text-center p-2 bg-gray-50 rounded">
                                     <p className="text-xs text-gray-600 mb-1">Nilai Akhir</p>
                                     <p className={`text-xl font-semibold ${getGradeColor(student.overall)}`}>{student.overall}</p>
@@ -366,9 +404,13 @@ export default function TeacherGrades({ onNavigate, onLogout, onViewStudentGrade
                                   </div>
 
                                   <div className="text-center p-2 bg-blue-50 rounded">
-                                    <p className="text-xs text-gray-600 mb-1">Rata-rata Quiz</p>
-                                    <p className="text-xl text-blue-900 font-semibold">{student.quizAvg}</p>
-                                    <p className="text-xs text-gray-600">{student.quizzes} kuis</p>
+                                    <p className="text-xs text-gray-600 mb-1">Quiz Pilihan Ganda</p>
+                                    <p className="text-xl text-blue-900 font-semibold">{student.averageMcq ?? 0}</p>
+                                  </div>
+
+                                  <div className="text-center p-2 bg-indigo-50 rounded">
+                                    <p className="text-xs text-gray-600 mb-1">Quiz Essay</p>
+                                    <p className="text-xl text-indigo-900 font-semibold">{student.averageEssay ?? 0}</p>
                                   </div>
 
                                   <div className="text-center p-2 bg-purple-50 rounded">
@@ -404,7 +446,6 @@ export default function TeacherGrades({ onNavigate, onLogout, onViewStudentGrade
               </Card>
             </TabsContent>
 
-            {/* Class Stats Tab */}
             <TabsContent value="class" className="space-y-6">
               <Card>
                 <CardHeader>
@@ -453,7 +494,6 @@ export default function TeacherGrades({ onNavigate, onLogout, onViewStudentGrade
               </Card>
             </TabsContent>
 
-            {/* Analysis Tab */}
             <TabsContent value="analysis" className="space-y-6">
               <div className="grid md:grid-cols-2 gap-6">
                 <Card>

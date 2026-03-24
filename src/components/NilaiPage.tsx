@@ -252,10 +252,12 @@ export function NilaiPage() {
           <CardContent className="pt-6">
             <div className="flex items-center justify-between mb-2">
               <Award className="w-8 h-8 opacity-80" />
-              <span className="text-xs bg-white/20 px-2 py-1 rounded-full">Rata-rata Nilai</span>
+              <span className="text-xs bg-white/20 px-2 py-1 rounded-full">Nilai Akhir</span>
             </div>
             <p className="text-3xl font-black">{safeData.summary.averageScore}</p>
-            <p className="text-xs opacity-80 mt-1">Target Semester: {safeData.summary.targetSemester}</p>
+            <p className="text-xs opacity-80 mt-1">
+              Kuis {safeData.summary.averageQuiz} • Proyek {safeData.summary.averageProject}
+            </p>
           </CardContent>
         </Card>
 
@@ -280,8 +282,8 @@ export function NilaiPage() {
                 <TrendingUp className="w-6 h-6 text-purple-600" />
               </div>
               <div>
-                <p className="text-xs text-gray-500 uppercase tracking-wider font-bold">Ranking</p>
-                <p className="text-xl font-bold text-gray-900">{safeData.summary.ranking}</p>
+                <p className="text-xs text-gray-500 uppercase tracking-wider font-bold">Rata-rata Proyek</p>
+                <p className="text-xl font-bold text-gray-900">{safeData.summary.averageProject}</p>
               </div>
             </div>
           </CardContent>
