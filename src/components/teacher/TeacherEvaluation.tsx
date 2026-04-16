@@ -227,6 +227,8 @@ export default function TeacherEvaluation({ onNavigate, projectId }: TeacherEval
     try {
       setSaving(true);
 
+      console.log("KIRIM RUBRICS:", detail.rubrics);
+
       await api.put(`/api/guru/project-submissions/${detail.id}/grade`, {
         teacherNote: feedback,
         rubrics: detail.rubrics.map((rubric) => ({

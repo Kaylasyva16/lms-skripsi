@@ -1,11 +1,9 @@
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
-import { Label } from "./ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./ui/card";
-import { Code2, Mail, Lock, User, GraduationCap, BookOpen, ChevronRight, ChevronLeft, ArrowRight, Sparkles, IdCard, School } from "lucide-react";
+import { Code2, BookOpen, GraduationCap, ChevronRight, ChevronLeft, ArrowRight, Sparkles } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
-import { ImageWithFallback } from "./figma/ImageWithFallback";
 import { useState, useEffect } from "react";
 
 interface RegisterPageProps {
@@ -13,19 +11,10 @@ interface RegisterPageProps {
   onSuccess: () => void;
 }
 
-const getLocalStorage = (key: string) => {
-  try {
-    const data = localStorage.getItem(key);
-    return data ? JSON.parse(data) : [];
-  } catch (error) {
-    console.error("Error parsing localStorage:", error);
-    return [];
-  }
-};
-
 export function RegisterPage({ onBack, onSuccess }: RegisterPageProps) {
   const [kelasList, setKelasList] = useState<any[]>([]);
   const [step, setStep] = useState(1);
+
   const [formData, setFormData] = useState({
     fullName: "",
     nis: "",
@@ -41,13 +30,11 @@ export function RegisterPage({ onBack, onSuccess }: RegisterPageProps) {
       const data = await res.json();
       setKelasList(data);
     };
-
     fetchKelas();
   }, []);
 
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
-    const { name, value } = e.target;
-    setFormData((prev) => ({ ...prev, [name]: value }));
+  const handleChange = (e: any) => {
+    setFormData({ ...formData, [e.target.name]: e.target.value });
   };
 
   const handleNext = () => {
@@ -58,7 +45,7 @@ export function RegisterPage({ onBack, onSuccess }: RegisterPageProps) {
     setStep(2);
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: any) => {
     e.preventDefault();
 
     if (formData.password !== formData.confirmPassword) {
@@ -66,21 +53,10 @@ export function RegisterPage({ onBack, onSuccess }: RegisterPageProps) {
       return;
     }
 
-    console.log("REGISTER PAYLOAD:", {
-      nama: formData.fullName,
-      email: formData.email.toLowerCase(),
-      password: formData.password,
-      role: "siswa",
-      nis: formData.nis,
-      kelas: formData.className,
-    });
-
     try {
-      const response = await fetch("http://localhost:5000/register", {
+      const res = await fetch("http://localhost:5000/register", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           nama: formData.fullName,
           email: formData.email.toLowerCase(),
@@ -91,149 +67,110 @@ export function RegisterPage({ onBack, onSuccess }: RegisterPageProps) {
         }),
       });
 
-      const data = await response.json();
+      const data = await res.json();
 
-      if (!response.ok) {
-        toast.error(data.error || data.message || "Register gagal");
-        console.log("REGISTER RESPONSE ERROR:", data);
+      if (!res.ok) {
+        toast.error(data.error || "Register gagal");
         return;
       }
 
-      toast.success("Pendaftaran berhasil!");
-      setTimeout(() => {
-        onSuccess();
-      }, 1500);
-    } catch (error) {
-      console.error(error);
+      toast.success("Registrasi berhasil!");
+      setTimeout(() => onSuccess(), 1500);
+    } catch {
       toast.error("Server error");
     }
   };
 
   return (
-    <div className="h-screen w-screen grid grid-cols-2 overflow-hidden">
-      {/* ================= LEFT SIDE ================= */}
+    <div className="min-h-screen grid grid-cols-1 lg:grid-cols-2">
+      {/* LEFT (HIDDEN DI MOBILE) */}
       <div
-        className="relative h-full w-full text-white flex flex-col"
+        className="hidden lg:flex relative text-white"
         style={{
           backgroundImage: `
-      linear-gradient(
-        to bottom right,
-        rgba(29,78,216,0.92),
-        rgba(37,99,235,0.90),
-        rgba(30,64,175,0.95)
-      ),
-      url('https://images.unsplash.com/photo-1561089489-f13d5e730d72?auto=format&fit=crop&w=1600&q=80')
-    `,
+            linear-gradient(to bottom right, rgba(29,78,216,0.92), rgba(37,99,235,0.9)),
+            url('https://images.unsplash.com/photo-1561089489-f13d5e730d72')
+          `,
           backgroundSize: "cover",
-          backgroundPosition: "center",
         }}
       >
-        <div className="h-full flex items-center">
-          <div className="w-full max-w-4xl mx-auto px-20">
-            {/* Logo */}
-            <div className="flex items-center gap-4 mb-20">
-              <div className="w-14 h-14 bg-white rounded-2xl flex items-center justify-center shadow-xl">
-                <Code2 className="w-7 h-7 text-blue-600" />
+        <div className="flex items-center w-full px-16">
+          <div>
+            <div className="flex items-center gap-3 mb-12">
+              <div className="w-12 h-12 bg-white rounded-xl flex items-center justify-center">
+                <Code2 className="text-blue-600" />
               </div>
               <div>
-                <h2 className="text-3xl font-bold">LMS PBL</h2>
-                <p className="text-blue-100">Problem-Based Learning</p>
+                <h2 className="text-2xl font-bold">LMS PBL</h2>
+                <p className="text-blue-100 text-sm">Problem-Based Learning</p>
               </div>
             </div>
 
-            {/* Hero */}
-            <div className="max-w-2xl">
-              <h1 className="text-6xl font-extrabold leading-tight mb-8">
-                Mulai Petualangan
-                <br />
-                <span className="text-blue-200">Belajarmu</span> Hari Ini.
-              </h1>
+            <h1 className="text-4xl lg:text-6xl font-bold mb-6">Mulai Belajarmu Hari Ini</h1>
 
-              <p className="text-blue-100 text-lg mb-10 leading-relaxed">Bergabunglah dengan ribuan siswa SMK RPL lainnya dalam sistem pembelajaran berbasis masalah yang seru dan interaktif.</p>
-
-              <div className="space-y-5">
-                <div className="flex items-center gap-4 bg-white/10 backdrop-blur-md p-4 rounded-2xl border border-white/20">
-                  <Sparkles className="w-6 h-6 text-blue-200" />
-                  <span>Sistem Gamifikasi (Level & Badge)</span>
-                </div>
-
-                <div className="flex items-center gap-4 bg-white/10 backdrop-blur-md p-4 rounded-2xl border border-white/20">
-                  <BookOpen className="w-6 h-6 text-blue-200" />
-                  <span>36 Modul Pemrograman Terstruktur</span>
-                </div>
-
-                <div className="flex items-center gap-4 bg-white/10 backdrop-blur-md p-4 rounded-2xl border border-white/20">
-                  <GraduationCap className="w-6 h-6 text-blue-200" />
-                  <span>Proyek PBL Dunia Nyata</span>
-                </div>
+            <div className="space-y-4">
+              <div className="flex gap-3">
+                <Sparkles /> <span>Gamifikasi</span>
+              </div>
+              <div className="flex gap-3">
+                <BookOpen /> <span>36 Modul</span>
+              </div>
+              <div className="flex gap-3">
+                <GraduationCap /> <span>Project Nyata</span>
               </div>
             </div>
           </div>
         </div>
       </div>
 
-      {/* ================= RIGHT SIDE ================= */}
-      <div className="h-full flex items-center justify-center bg-gradient-to-br from-slate-50 to-slate-100">
-        <div className="w-full max-w-lg px-8">
-          {/* Back & Step Indicator */}
-          <div className="mb-8 flex items-center justify-between">
-            <button onClick={onBack} className="flex items-center gap-2 text-gray-500 hover:text-blue-600">
-              <ChevronLeft className="w-4 h-4" />
-              <span className="text-sm">Kembali ke Login</span>
-            </button>
+      {/* RIGHT */}
+      <div className="flex items-center justify-center px-4 sm:px-6 py-10 bg-gray-50">
+        <div className="w-full max-w-md sm:max-w-lg">
+          {/* BACK */}
+          <button onClick={onBack} className="mb-6 text-sm text-gray-500 flex items-center gap-2">
+            <ChevronLeft className="w-4 h-4" /> Kembali
+          </button>
 
-            <div className="flex gap-2">
-              <div className={`h-1.5 w-10 rounded-full ${step === 1 ? "bg-blue-600" : "bg-blue-200"}`} />
-              <div className={`h-1.5 w-10 rounded-full ${step === 2 ? "bg-blue-600" : "bg-blue-200"}`} />
-            </div>
-          </div>
-
-          {/* Card */}
-          <Card className="shadow-2xl border border-slate-200 rounded-3xl bg-white">
+          <Card className="shadow-xl rounded-2xl">
             <CardHeader>
-              <CardTitle className="text-4xl font-black tracking-tight">Daftar Sekarang</CardTitle>
-              <CardDescription>{step === 1 ? "Lengkapi data diri untuk memulai profil belajarmu." : "Keamanan akun adalah prioritas kami."}</CardDescription>
+              <CardTitle className="text-2xl sm:text-3xl font-bold">Daftar</CardTitle>
+              <CardDescription>{step === 1 ? "Isi data diri" : "Buat akun"}</CardDescription>
             </CardHeader>
 
             <CardContent>
-              <form onSubmit={handleSubmit} noValidate>
+              <form onSubmit={handleSubmit}>
                 <AnimatePresence mode="wait">
                   {step === 1 ? (
-                    <motion.div key="step1" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-4">
-                      <Input className="h-12 text-base" name="fullName" placeholder="Nama Lengkap" value={formData.fullName} onChange={handleChange} required />
+                    <motion.div key="1" className="space-y-4">
+                      <Input name="fullName" placeholder="Nama" onChange={handleChange} />
 
-                      <div className="grid grid-cols-2 gap-4">
-                        <Input name="nis" placeholder="NIS" className="h-12" value={formData.nis} onChange={handleChange} required />
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <Input name="nis" placeholder="NIS" onChange={handleChange} />
 
-                        <select name="className" className="h-12 border rounded-md px-3 text-sm w-full" value={formData.className} onChange={handleChange} required>
-                          <option value="">Pilih Kelas</option>
-                          {kelasList.map((kelas, index) => (
-                            <option key={index} value={kelas.nama}>
-                              {kelas.nama}
-                            </option>
+                        <select name="className" className="h-12 border rounded-md px-3" onChange={handleChange}>
+                          <option value="">Kelas</option>
+                          {kelasList.map((k, i) => (
+                            <option key={i}>{k.nama}</option>
                           ))}
                         </select>
                       </div>
 
-                      <Button type="button" onClick={handleNext} className=" w-full h-12 text-base font-semibold rounded-xl !bg-blue-600 text-white hover:!bg-blue-700 transition-all duration-300 shadow-md hover:shadow-lg">
-                        Selanjutnya <ChevronRight className="w-4 h-4 ml-2" />
+                      <Button type="button" onClick={handleNext} className="w-full h-12">
+                        Lanjut <ChevronRight className="ml-2 w-4 h-4" />
                       </Button>
                     </motion.div>
                   ) : (
-                    <motion.div key="step2" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="space-y-4">
-                      <Input name="email" type="email" placeholder="Email Sekolah" value={formData.email} onChange={handleChange} required />
-
-                      <Input name="password" type="password" placeholder="Password" value={formData.password} onChange={handleChange} required />
-
-                      <Input name="confirmPassword" type="password" placeholder="Konfirmasi Password" value={formData.confirmPassword} onChange={handleChange} required />
+                    <motion.div key="2" className="space-y-4">
+                      <Input name="email" placeholder="Email" onChange={handleChange} />
+                      <Input name="password" type="password" placeholder="Password" onChange={handleChange} />
+                      <Input name="confirmPassword" type="password" placeholder="Konfirmasi" onChange={handleChange} />
 
                       <div className="flex gap-3">
-                        <Button type="button" variant="outline" onClick={() => setStep(1)} className="flex-1 h-12 text-base font-semibold rounded-xl">
-                          Sebelumnya
+                        <Button type="button" variant="outline" onClick={() => setStep(1)} className="flex-1">
+                          Kembali
                         </Button>
-
-                        <Button type="submit" className="flex-1 h-12 text-base font-semibold rounded-xl !bg-blue-600 text-white hover:!bg-blue-700 transition-all duration-300 shadow-md hover:shadow-lg">
-                          Daftar <ArrowRight className="w-4 h-4 ml-2" />
+                        <Button type="submit" className="flex-1">
+                          Daftar <ArrowRight className="ml-2 w-4 h-4" />
                         </Button>
                       </div>
                     </motion.div>

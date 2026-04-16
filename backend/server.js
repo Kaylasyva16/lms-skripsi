@@ -117,16 +117,6 @@ app.post("/register", async (req, res) => {
       [nama, email.toLowerCase(), hashedPassword, role, nis || null, kelas || null]
     );
 
-    if (role === "siswa") {
-      await client.query(
-        `
-        INSERT INTO siswa (nis, nama, kelas)
-        VALUES ($1, $2, $3)
-        `,
-        [nis, nama, kelas]
-      );
-    }
-
     await client.query("COMMIT");
 
     res.status(201).json({
@@ -269,85 +259,61 @@ app.get("/dashboard/guru", authenticateToken, authorizeRole(["guru"]), async (re
   try {
     const userId = req.user.id;
 
-    // Ambil mapel guru
-    const mapelResult = await pool.query(
+    // ✅ TOTAL SISWA (langsung dari users)
+    const siswaResult = await pool.query(
       `
-      SELECT m.id, m.nama
-      FROM guru_mapel gm
-      JOIN mapel m ON gm.mapel_id = m.id
-      WHERE gm.guru_id = $1
-    `,
+      SELECT COUNT(*)
+      FROM users
+      WHERE role = 'siswa'
+      `
+    );
+
+    // ✅ PROYEK AKTIF (dari projects)
+    const projectResult = await pool.query(
+      `
+      SELECT COUNT(*) FROM (
+        SELECT 
+          p.id,
+          CASE
+            WHEN COUNT(qs.id) > 0
+             AND COUNT(qs.id) = COUNT(CASE WHEN qs.status = 'graded' THEN 1 END)
+            THEN 'completed'
+            ELSE 'active'
+          END AS status
+    
+        FROM projects p
+        JOIN kelas k ON k.id = p.class_id
+        LEFT JOIN quizzes q ON q.kelas = k.nama
+        LEFT JOIN quiz_submissions qs ON qs.quiz_id = q.id
+    
+        WHERE p.created_by = $1
+        GROUP BY p.id
+      ) sub
+      WHERE status = 'active'
+      `,
       [userId]
     );
 
-    const mapelIds = mapelResult.rows.map((m) => m.id);
-
-    if (mapelIds.length === 0) {
-      return res.json({
-        totalStudents: 0,
-        activeProjects: 0,
-        pendingGrades: 0,
-        completionRate: 0,
-      });
-    }
-
-    // Total siswa berdasarkan tugas mapel guru
-    const siswaResult = await pool.query(
-      `
-      SELECT COUNT(DISTINCT u.id)
-      FROM users u
-      JOIN nilai n ON n.siswa_id = u.id
-      JOIN tugas t ON t.id = n.tugas_id
-      WHERE u.role = 'siswa'
-      AND t.mapel_id = ANY($1)
-    `,
-      [mapelIds]
-    );
-
-    // Total tugas mapel guru
-    const tugasResult = await pool.query(
-      `
-      SELECT COUNT(*)
-      FROM tugas
-      WHERE mapel_id = ANY($1)
-    `,
-      [mapelIds]
-    );
-
-    // Pending nilai hanya mapel guru
+    // ✅ PENDING NILAI
     const pendingResult = await pool.query(
       `
       SELECT COUNT(*)
-      FROM nilai n
-      JOIN tugas t ON t.id = n.tugas_id
-      WHERE n.status = 'belum_dinilai'
-      AND t.mapel_id = ANY($1)
-    `,
-      [mapelIds]
+      FROM quiz_submissions qs
+      JOIN quizzes q ON q.id = qs.quiz_id
+      WHERE q.created_by = $1
+      AND qs.status = 'submitted'
+      `,
+      [userId]
     );
 
-    // Completion rate hanya mapel guru
-    const completionResult = await pool.query(
-      `
-      SELECT 
-        ROUND(
-          COUNT(n.id) * 100.0 / NULLIF(COUNT(DISTINCT u.id),0),
-          0
-        ) AS completion
-      FROM users u
-      JOIN nilai n ON n.siswa_id = u.id
-      JOIN tugas t ON t.id = n.tugas_id
-      WHERE u.role = 'siswa'
-      AND t.mapel_id = ANY($1)
-    `,
-      [mapelIds]
-    );
+    // ✅ COMPLETION RATE (simple version dulu)
+    const completionRate = 0;
 
     res.json({
       totalStudents: parseInt(siswaResult.rows[0].count) || 0,
-      activeProjects: parseInt(tugasResult.rows[0].count) || 0,
+      activeProjects: parseInt(projectResult.rows[0].count) || 0,
       pendingGrades: parseInt(pendingResult.rows[0].count) || 0,
-      completionRate: completionResult.rows[0].completion || 0,
+      completionRate,
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -2299,11 +2265,31 @@ app.get("/api/projects", authenticateToken, authorizeRole(["guru"]), async (req,
         TO_CHAR(p.deadline, 'DD Mon YYYY') AS deadline,
         p.description,
         p.members_per_group AS "membersPerGroup",
-        p.status,
-        p.created_at AS "createdAt"
+        p.created_at AS "createdAt",
+    
+        COUNT(qs.id) AS total,
+        COUNT(CASE WHEN qs.status = 'graded' THEN 1 END) AS graded,
+    
+        ROUND(
+          COUNT(CASE WHEN qs.status = 'graded' THEN 1 END) * 100.0
+          / NULLIF(COUNT(qs.id), 0)
+        ) AS progress,
+    
+        CASE
+          WHEN COUNT(qs.id) > 0
+           AND COUNT(qs.id) = COUNT(CASE WHEN qs.status = 'graded' THEN 1 END)
+          THEN 'completed'
+          ELSE 'active'
+        END AS status
+    
       FROM projects p
       JOIN kelas k ON k.id = p.class_id
+      LEFT JOIN quizzes q ON q.kelas = k.nama
+      LEFT JOIN quiz_submissions qs ON qs.quiz_id = q.id
+    
       WHERE p.created_by = $1
+    
+      GROUP BY p.id, k.nama
       ORDER BY p.created_at DESC
       `,
       [req.user.id]
@@ -4452,6 +4438,8 @@ app.get("/api/guru/project-submissions/:submissionId", authenticateToken, author
 app.put("/api/guru/project-submissions/:submissionId/grade", authenticateToken, authorizeRole(["guru"]), async (req, res) => {
   const client = await pool.connect();
 
+  console.log("MASUK API GRADE");
+
   try {
     const { submissionId } = req.params;
     const { teacherNote, rubrics } = req.body;
@@ -4490,13 +4478,6 @@ app.put("/api/guru/project-submissions/:submissionId/grade", authenticateToken, 
     }
 
     const submission = submissionCheck.rows[0];
-
-    if (submission.status === "selesai") {
-      await client.query("ROLLBACK");
-      return res.status(400).json({
-        message: "Submission ini sudah dinilai dan tidak dapat diubah lagi",
-      });
-    }
 
     const rubricMasterResult = await client.query(
       `
@@ -5361,6 +5342,449 @@ app.get("/api/guru/kkm", authenticateToken, authorizeRole(["guru"]), async (req,
   } catch (err) {
     console.error("GET KKM ERROR:", err);
     res.status(500).json({ message: "Gagal mengambil KKM", error: err.message });
+  }
+});
+
+app.get("/api/student/latest-activities", authenticateToken, authorizeRole(["siswa"]), async (req, res) => {
+  try {
+    const studentResult = await pool.query(
+      `
+      SELECT id, kelas
+      FROM users
+      WHERE id = $1 AND role = 'siswa'
+      `,
+      [req.user.id]
+    );
+
+    if (studentResult.rows.length === 0) {
+      return res.status(404).json({ message: "Siswa tidak ditemukan" });
+    }
+
+    const siswa = studentResult.rows[0];
+
+    // tugas biasa, exclude yang bentrok dengan project
+    const tugasResult = await pool.query(
+      `
+      SELECT
+        t.id,
+        'tugas' AS type,
+        t.judul AS title,
+        COALESCE(m.nama, '-') AS subject,
+        t.deadline AS "rawDate",
+        TO_CHAR(t.deadline, 'DD Mon YYYY') AS "dueDate",
+        CASE
+          WHEN n.id IS NULL THEN 'pending'
+          WHEN n.status = 'belum_dinilai' THEN 'in-progress'
+          ELSE 'completed'
+        END AS status,
+        CASE
+          WHEN t.deadline < CURRENT_DATE THEN 'high'
+          WHEN t.deadline <= CURRENT_DATE + INTERVAL '3 days' THEN 'medium'
+          ELSE 'low'
+        END AS priority
+      FROM tugas t
+      LEFT JOIN mapel m
+        ON m.id = t.mapel_id
+      LEFT JOIN nilai n
+        ON n.tugas_id = t.id
+       AND n.siswa_id = $1
+      WHERE t.kelas = $2
+        AND NOT EXISTS (
+          SELECT 1
+          FROM projects p
+          JOIN kelas k ON k.id = p.class_id
+          WHERE k.nama = t.kelas
+            AND LOWER(TRIM(p.title)) = LOWER(TRIM(t.judul))
+        )
+      `,
+      [req.user.id, siswa.kelas]
+    );
+
+    const quizResult = await pool.query(
+      `
+      SELECT
+        q.id,
+        'quiz' AS type,
+        q.title,
+        'Quiz' AS subject,
+        COALESCE(q.created_at, NOW()) AS "rawDate",
+        TO_CHAR(COALESCE(q.created_at, NOW()), 'DD Mon YYYY') AS "dueDate",
+        CASE
+          WHEN qs.id IS NULL THEN 'pending'
+          WHEN qs.status = 'graded' THEN 'completed'
+          ELSE 'in-progress'
+        END AS status,
+        'medium' AS priority
+      FROM quizzes q
+      LEFT JOIN quiz_submissions qs
+        ON qs.quiz_id = q.id
+       AND qs.student_id = $1
+      WHERE q.kelas = $2
+        AND q.status = 'published'
+      `,
+      [req.user.id, siswa.kelas]
+    );
+
+    // project PBL, ambil submission final syntax 4 tahap 4 kalau ada
+    const projectResult = await pool.query(
+      `
+      SELECT DISTINCT ON (p.id)
+        p.id,
+        'project' AS type,
+        p.title,
+        'Project Based Learning' AS subject,
+        p.deadline AS "rawDate",
+        TO_CHAR(p.deadline, 'DD Mon YYYY') AS "dueDate",
+        CASE
+          WHEN final_sub.id IS NULL THEN 'pending'
+          WHEN final_sub.status IN ('selesai', 'graded') THEN 'completed'
+          ELSE 'in-progress'
+        END AS status,
+        CASE
+          WHEN p.deadline < CURRENT_DATE THEN 'high'
+          WHEN p.deadline <= CURRENT_DATE + INTERVAL '3 days' THEN 'medium'
+          ELSE 'low'
+        END AS priority
+      FROM projects p
+      JOIN kelas k
+        ON k.id = p.class_id
+      LEFT JOIN project_group_members pgm
+        ON pgm.student_id = $1
+      LEFT JOIN project_stage_submissions final_sub
+        ON final_sub.group_id = pgm.group_id
+      LEFT JOIN project_stages pst
+        ON pst.id = final_sub.stage_id
+      LEFT JOIN project_syntaxes psy
+        ON psy.id = pst.syntax_id
+      WHERE k.nama = $2
+        AND (
+          final_sub.id IS NULL
+          OR (
+            psy.project_id = p.id
+            AND psy.syntax_no = 4
+            AND pst.stage_no = 4
+          )
+        )
+      ORDER BY p.id, final_sub.submitted_at DESC NULLS LAST
+      `,
+      [req.user.id, siswa.kelas]
+    );
+
+    const merged = [...tugasResult.rows, ...quizResult.rows, ...projectResult.rows]
+      .filter((item) => item.title)
+      .sort((a, b) => new Date(a.rawDate).getTime() - new Date(b.rawDate).getTime())
+      .slice(0, 5)
+      .map((item) => ({
+        id: item.id,
+        type: item.type,
+        title: item.title,
+        subject: item.subject,
+        dueDate: item.dueDate,
+        status: item.status,
+        priority: item.priority,
+      }));
+
+    res.json(merged);
+  } catch (err) {
+    console.error("GET LATEST ACTIVITIES ERROR:", err);
+    res.status(500).json({
+      message: "Gagal mengambil aktivitas terbaru",
+      error: err.message,
+    });
+  }
+});
+
+app.get("/api/student/recent-learning", authenticateToken, authorizeRole(["siswa"]), async (req, res) => {
+  try {
+    const siswaId = req.user.id;
+
+    const result = await pool.query(
+      `
+      SELECT
+        m.id,
+        mo.title,
+        m.title AS module,
+        CASE
+          WHEN ps.status = 'selesai' THEN 100
+          ELSE 33
+        END AS progress,
+        COALESCE(ps.updated_at, m.created_at) AS "lastAccessRaw"
+      FROM materi m
+      JOIN modules mo
+        ON mo.id = m.module_id
+      LEFT JOIN progress_siswa ps
+        ON ps.materi_id = m.id
+       AND ps.siswa_id = $1
+      ORDER BY COALESCE(ps.updated_at, m.created_at) DESC
+      LIMIT 3
+      `,
+      [siswaId]
+    );
+
+    const data = result.rows.map((row) => ({
+      id: row.id,
+      title: row.title,
+      module: row.module,
+      progress: Number(row.progress || 0),
+      lastAccessed: new Date(row.lastAccessRaw).toLocaleString("id-ID", {
+        day: "numeric",
+        month: "short",
+        hour: "2-digit",
+        minute: "2-digit",
+      }),
+      icon: "📘",
+    }));
+
+    res.json(data);
+  } catch (err) {
+    console.error("GET RECENT LEARNING ERROR:", err);
+    res.status(500).json({
+      message: "Gagal mengambil pembelajaran terbaru",
+      error: err.message,
+    });
+  }
+});
+
+app.get("/api/student/performance", authenticateToken, authorizeRole(["siswa"]), async (req, res) => {
+  try {
+    const siswaId = req.user.id;
+
+    // total tugas selesai
+    const tugas = await pool.query(
+      `
+      SELECT COUNT(*) 
+      FROM nilai
+      WHERE siswa_id = $1
+        AND status = 'dinilai'
+      `,
+      [siswaId]
+    );
+
+    // contoh poin (sementara = jumlah tugas * 90)
+    const completedTasks = Number(tugas.rows[0].count);
+    const points = completedTasks * 90;
+
+    // dummy jam belajar (bisa kamu upgrade nanti dari log activity)
+    const studyHours = completedTasks * 2.5;
+
+    res.json({
+      studyHours,
+      completedTasks,
+      points,
+    });
+  } catch (err) {
+    console.error("GET PERFORMANCE ERROR:", err);
+    res.status(500).json({
+      message: "Gagal mengambil performa",
+      error: err.message,
+    });
+  }
+});
+
+app.get("/api/student/learning-distribution", authenticateToken, authorizeRole(["siswa"]), async (req, res) => {
+  try {
+    const siswaId = req.user.id;
+
+    const materiResult = await pool.query(
+      `
+      SELECT COUNT(*)::int AS total
+      FROM progress_siswa
+      WHERE siswa_id = $1
+      `,
+      [siswaId]
+    );
+
+    const quizResult = await pool.query(
+      `
+      SELECT COUNT(*)::int AS total
+      FROM quiz_submissions
+      WHERE student_id = $1
+      `,
+      [siswaId]
+    );
+
+    const projectResult = await pool.query(
+      `
+      SELECT COUNT(DISTINCT p.id)::int AS total
+      FROM project_stage_submissions pss
+      JOIN project_stages pst
+        ON pst.id = pss.stage_id
+      JOIN project_syntaxes psy
+        ON psy.id = pst.syntax_id
+      JOIN projects p
+        ON p.id = psy.project_id
+      JOIN project_group_members pgm
+        ON pgm.group_id = pss.group_id
+      WHERE pgm.student_id = $1
+        AND psy.syntax_no = 4
+        AND pst.stage_no = 4
+      `,
+      [siswaId]
+    );
+
+    const materi = Number(materiResult.rows[0]?.total || 0);
+    const kuis = Number(quizResult.rows[0]?.total || 0);
+    const project = Number(projectResult.rows[0]?.total || 0);
+
+    const total = materi + kuis + project;
+
+    const distribution = [
+      {
+        name: "Materi",
+        value: total === 0 ? 0 : Math.round((materi / total) * 100),
+        color: "#3b82f6",
+      },
+      {
+        name: "Kuis",
+        value: total === 0 ? 0 : Math.round((kuis / total) * 100),
+        color: "#8b5cf6",
+      },
+      {
+        name: "Project",
+        value: total === 0 ? 0 : Math.round((project / total) * 100),
+        color: "#10b981",
+      },
+    ];
+
+    console.log("LEARNING DISTRIBUTION:", {
+      siswaId,
+      materi,
+      kuis,
+      project,
+      total,
+      distribution,
+    });
+
+    res.json(distribution);
+  } catch (err) {
+    console.error("GET LEARNING DISTRIBUTION ERROR:", err);
+    res.status(500).json({
+      message: "Gagal mengambil distribusi pembelajaran",
+      error: err.message,
+    });
+  }
+});
+
+app.get("/api/student/weekly-activity", authenticateToken, authorizeRole(["siswa"]), async (req, res) => {
+  try {
+    const siswaId = req.user.id;
+
+    const result = await pool.query(
+      `
+      WITH activity_logs AS (
+        SELECT DATE(COALESCE(ps.created_at, NOW())) AS activity_date
+        FROM progress_siswa ps
+        WHERE ps.siswa_id = $1
+          AND COALESCE(ps.created_at, NOW()) >= CURRENT_DATE - INTERVAL '6 days'
+
+        UNION ALL
+
+        SELECT DATE(COALESCE(qs.submitted_at, qs.graded_at, NOW())) AS activity_date
+        FROM quiz_submissions qs
+        WHERE qs.student_id = $1
+          AND COALESCE(qs.submitted_at, qs.graded_at, NOW()) >= CURRENT_DATE - INTERVAL '6 days'
+
+        UNION ALL
+
+        SELECT DATE(COALESCE(pss.submitted_at, pss.updated_at, NOW())) AS activity_date
+        FROM project_stage_submissions pss
+        JOIN project_group_members pgm
+          ON pgm.group_id = pss.group_id
+        WHERE pgm.student_id = $1
+          AND COALESCE(pss.submitted_at, pss.updated_at, NOW()) >= CURRENT_DATE - INTERVAL '6 days'
+      ),
+      grouped AS (
+        SELECT
+          activity_date,
+          COUNT(*)::int AS total_activity
+        FROM activity_logs
+        GROUP BY activity_date
+      )
+      SELECT
+        TO_CHAR(day_series.day, 'Dy') AS day_label,
+        COALESCE(grouped.total_activity, 0) AS total_activity
+      FROM generate_series(
+        CURRENT_DATE - INTERVAL '6 days',
+        CURRENT_DATE,
+        INTERVAL '1 day'
+      ) AS day_series(day)
+      LEFT JOIN grouped
+        ON grouped.activity_date = DATE(day_series.day)
+      ORDER BY day_series.day ASC
+      `,
+      [siswaId]
+    );
+
+    const dayMap = {
+      Mon: "Sen",
+      Tue: "Sel",
+      Wed: "Rab",
+      Thu: "Kam",
+      Fri: "Jum",
+      Sat: "Sab",
+      Sun: "Min",
+    };
+
+    const data = result.rows.map((row) => ({
+      day: dayMap[row.day_label] || row.day_label,
+      hours: Number((row.total_activity * 0.5).toFixed(1)),
+    }));
+
+    console.log("WEEKLY ACTIVITY:", data);
+
+    res.json(data);
+  } catch (err) {
+    console.error("GET WEEKLY ACTIVITY ERROR:", err);
+    res.status(500).json({
+      message: "Gagal mengambil aktivitas mingguan",
+      error: err.message,
+    });
+  }
+});
+
+app.get("/api/guru/deadline-terdekat", authenticateToken, authorizeRole(["guru"]), async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT
+        t.id,
+        t.judul,
+        t.kelas,
+        TO_CHAR(t.deadline, 'DD Mon YYYY') AS deadline,
+
+        COUNT(DISTINCT u.id) AS total_siswa,
+        COUNT(DISTINCT n.siswa_id) AS sudah_kumpul
+
+      FROM tugas t
+      LEFT JOIN users u 
+        ON u.kelas = t.kelas AND u.role = 'siswa'
+      LEFT JOIN nilai n 
+        ON n.tugas_id = t.id
+
+      WHERE t.deadline >= CURRENT_DATE
+
+      GROUP BY t.id
+      ORDER BY t.deadline ASC
+      LIMIT 5
+    `);
+
+    const data = result.rows.map((item) => {
+      const sisaHari = Math.ceil((new Date(item.deadline) - new Date()) / (1000 * 60 * 60 * 24));
+
+      return {
+        id: item.id,
+        title: item.judul,
+        kelas: item.kelas,
+        deadline: item.deadline,
+        progress: `${item.sudah_kumpul}/${item.total_siswa}`,
+        percent: item.total_siswa > 0 ? Math.round((item.sudah_kumpul / item.total_siswa) * 100) : 0,
+        sisaHari,
+      };
+    });
+
+    res.json(data);
+  } catch (err) {
+    console.error("DEADLINE ERROR:", err);
+    res.status(500).json({ message: "Gagal ambil deadline" });
   }
 });
 

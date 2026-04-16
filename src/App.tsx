@@ -19,6 +19,9 @@ import TeacherApp from "./components/teacher/teacherApp";
 import AdminDashboard from "./components/admin/AdminDashboard";
 import StudentDashboard from "./components/StudentDashboard";
 
+import { Menu, X } from "lucide-react";
+import { motion, AnimatePresence } from "framer-motion";
+
 type Role = "siswa" | "guru" | "admin";
 type AdminPage = "dashboard" | "guru" | "mapel" | "kelas" | "siswa";
 
@@ -27,6 +30,19 @@ export default function App() {
   const [userRole, setUserRole] = useState<Role | null>(null);
   const [currentPage, setCurrentPage] = useState("home");
   const [user, setUser] = useState<any>(null);
+
+  const [isScrolled, setIsScrolled] = useState(false);
+
+  const [menuOpen, setMenuOpen] = useState(false);
+
+  useEffect(() => {
+    const handleScroll = () => {
+      setIsScrolled(window.scrollY > 50);
+    };
+
+    window.addEventListener("scroll", handleScroll);
+    return () => window.removeEventListener("scroll", handleScroll);
+  }, []);
 
   useEffect(() => {
     localStorage.setItem("currentPage", currentPage);
@@ -142,38 +158,101 @@ export default function App() {
   // =========================
   if (!isLoggedIn && (currentPage === "home" || currentPage === "about")) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-blue-50 to-blue-100">
+      <div className="min-h-screen bg-gradient-to-br from-blue-500 to-blue-700">
         <Toaster />
-
         {/* HEADER */}
-        <header className="bg-white border-b shadow-sm sticky top-0 z-50">
-          <div className="max-w-7xl mx-auto px-6 h-16 flex items-center justify-between">
+        <header
+          className="sticky top-0 z-50 
+  bg-white/20 backdrop-blur-lg 
+  border-b border-white/20 
+  shadow-sm shadow-black/10"
+        >
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between">
+            {/* LOGO */}
             <div className="flex items-center gap-3 cursor-pointer" onClick={() => setCurrentPage("home")}>
-              <div className="w-10 h-10 bg-blue-500 rounded-lg flex items-center justify-center">
+              <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${isScrolled ? "bg-blue-500" : "bg-white/20"}`}>
                 <Code2 className="text-white" />
               </div>
+
               <div>
-                <h1 className="text-blue-900">LMS PBL</h1>
-                <p className="text-xs text-gray-600">SMK RPL</p>
+                <h1 className={`font-semibold text-sm sm:text-base ${isScrolled ? "text-gray-900" : "text-white"}`}>RPL Learn</h1>
+                <p className={`text-xs ${isScrolled ? "text-gray-500" : "text-white/70"}`}>SMKN 2 Surabaya</p>
               </div>
             </div>
 
-            <div className="flex items-center gap-6">
-              <button onClick={() => setCurrentPage("home")}>Beranda</button>
-              <button onClick={() => setCurrentPage("about")}>Tentang PBL</button>
-              <Button onClick={() => setCurrentPage("login")} className="bg-blue-600 hover:bg-blue-700 text-white">
+            {/* DESKTOP MENU */}
+            <div className="hidden md:flex items-center gap-6">
+              <button onClick={() => setCurrentPage("home")} className={isScrolled ? "text-gray-700" : "text-white/80 hover:text-white"}>
+                Beranda
+              </button>
+
+              <button onClick={() => setCurrentPage("about")} className={isScrolled ? "text-gray-700" : "text-white/80 hover:text-white"}>
+                Tentang PBL
+              </button>
+
+              <Button onClick={() => setCurrentPage("login")} className={isScrolled ? "bg-blue-600 text-white hover:bg-blue-700" : "bg-white text-blue-600 hover:bg-yellow-300"}>
                 Login
               </Button>
             </div>
-          </div>
-        </header>
 
+            {/* MOBILE BUTTON */}
+            <button className="md:hidden text-white" onClick={() => setMenuOpen(!menuOpen)}>
+              {menuOpen ? <X /> : <Menu />}
+            </button>
+          </div>
+
+          {/* MOBILE MENU */}
+          <AnimatePresence>
+            {menuOpen && (
+              <motion.div
+                initial={{ opacity: 0, y: -15 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -15 }}
+                transition={{ duration: 0.25 }}
+                className="md:hidden absolute top-16 left-0 w-full bg-white shadow-xl rounded-b-2xl z-50"
+              >
+                <div className="flex flex-col p-4 gap-2">
+                  <button
+                    onClick={() => {
+                      setCurrentPage("home");
+                      setMenuOpen(false);
+                    }}
+                    className="text-left px-4 py-3 rounded-lg hover:bg-gray-100 font-medium text-gray-800"
+                  >
+                    Beranda
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      setCurrentPage("about");
+                      setMenuOpen(false);
+                    }}
+                    className="text-left px-4 py-3 rounded-lg hover:bg-gray-100 font-medium text-gray-800"
+                  >
+                    Tentang PBL
+                  </button>
+
+                  <div className="pt-2">
+                    <Button
+                      onClick={() => {
+                        setCurrentPage("login");
+                        setMenuOpen(false);
+                      }}
+                      className="w-full rounded-lg bg-blue-600 hover:bg-blue-700 text-white"
+                    >
+                      Login
+                    </Button>
+                  </div>
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </header>
         {currentPage === "home" && <LandingPage onNavigate={setCurrentPage} />}
         {currentPage === "about" && <AboutPBL />}
       </div>
     );
   }
-
   // =========================
 
   // =========================
