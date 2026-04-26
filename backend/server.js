@@ -17,15 +17,11 @@ dotenv.config();
 const app = express();
 
 function calculateWeightedScore(rubrics = []) {
-  let total = 0;
+  const totalScore = rubrics.reduce((sum, item) => {
+    return sum + Number(item.score || 0);
+  }, 0);
 
-  for (const item of rubrics) {
-    const score = Number(item.score || 0);
-    const weight = Number(item.weight || 0);
-    total += (score * weight) / 100;
-  }
-
-  return Number(total.toFixed(2));
+  return Number(((totalScore / 28) * 100).toFixed(2));
 }
 
 // fungsi untuk mengubah bytes → MB
@@ -259,13 +255,30 @@ app.get("/dashboard/guru", authenticateToken, authorizeRole(["guru"]), async (re
   try {
     const userId = req.user.id;
 
-    // ✅ TOTAL SISWA (langsung dari users)
+    // 🔥 ambil kelas guru dulu
+    const guruResult = await pool.query(`SELECT kelas FROM users WHERE id = $1`, [userId]);
+
+    const kelas = guruResult.rows[0]?.kelas;
+
+    // 🔥 kalau guru ga punya kelas
+    if (!kelas) {
+      return res.json({
+        totalStudents: 0,
+        activeProjects: 0,
+        pendingGrades: 0,
+        completionRate: 0,
+      });
+    }
+
+    // ✅ FIX: filter berdasarkan kelas
     const siswaResult = await pool.query(
       `
-      SELECT COUNT(*)
-      FROM users
-      WHERE role = 'siswa'
-      `
+  SELECT COUNT(*)
+  FROM users
+  WHERE role = 'siswa'
+  AND LOWER(kelas) = LOWER($1)
+  `,
+      [kelas]
     );
 
     // ✅ PROYEK AKTIF (dari projects)
@@ -324,6 +337,15 @@ app.get("/dashboard/guru/progress", authenticateToken, authorizeRole(["guru"]), 
   try {
     const userId = req.user.id;
 
+    // 🔥 ambil kelas guru
+    const guruResult = await pool.query(`SELECT kelas FROM users WHERE id = $1`, [userId]);
+
+    const kelas = guruResult.rows[0]?.kelas;
+
+    if (!kelas) {
+      return res.json([]);
+    }
+
     const result = await pool.query(
       `
       SELECT 
@@ -340,10 +362,11 @@ app.get("/dashboard/guru/progress", authenticateToken, authorizeRole(["guru"]), 
       JOIN guru_mapel gm ON gm.mapel_id = t.mapel_id
       WHERE u.role = 'siswa'
       AND gm.guru_id = $1
+      AND LOWER(u.kelas) = LOWER($2) -- 🔥 INI FIX NYA
       GROUP BY u.kelas
       ORDER BY u.kelas ASC
-    `,
-      [userId]
+      `,
+      [userId, kelas]
     );
 
     res.json(result.rows);
@@ -454,13 +477,17 @@ app.put("/api/modules/:id", authenticateToken, authorizeRole(["guru"]), async (r
 });
 
 // API AMBIL MATERI UNTUK SISWA //
-app.get("/api/courses/:id/modules", async (req, res) => {
+app.get("/api/courses/:id/modules", authenticateToken, async (req, res) => {
   const courseId = req.params.id;
-  const siswaId = req.query.siswaId;
+  const siswaId = req.user.id;
 
   try {
-    const result = await pool.query(
-      `
+    // 🔥 ambil kelas siswa dari DB
+    const userResult = await pool.query(`SELECT kelas FROM users WHERE id = $1`, [siswaId]);
+
+    const kelas = userResult.rows[0]?.kelas;
+
+    let query = `
       SELECT 
         m.id,
         m.course_id,
@@ -478,40 +505,19 @@ app.get("/api/courses/:id/modules", async (req, res) => {
         COUNT(DISTINCT mt.id)::int AS total_materials,
         COUNT(DISTINCT CASE WHEN ps.status = 'selesai' THEN mt.id END)::int AS completed_materials
       FROM modules m
-      LEFT JOIN materi mt
-        ON mt.module_id = m.id
-      LEFT JOIN progress_siswa ps
+      LEFT JOIN materi mt ON mt.module_id = m.id
+      LEFT JOIN progress_siswa ps 
         ON ps.materi_id = mt.id
         AND ps.siswa_id = $2
       WHERE m.course_id = $1
+      AND LOWER(TRIM(m.kelas)) = LOWER(TRIM($3)) -- 🔥 WAJIB
       GROUP BY m.id
       ORDER BY m.order_number ASC
-      `,
-      [courseId, siswaId]
-    );
+    `;
 
-    const modules = result.rows.map((row) => {
-      let parsedTopics = [];
+    const result = await pool.query(query, [courseId, siswaId, kelas]);
 
-      try {
-        if (Array.isArray(row.topics)) {
-          parsedTopics = row.topics;
-        } else if (typeof row.topics === "string") {
-          parsedTopics = JSON.parse(row.topics);
-        } else if (row.topics) {
-          parsedTopics = row.topics;
-        }
-      } catch (e) {
-        parsedTopics = [];
-      }
-
-      return {
-        ...row,
-        topics: Array.isArray(parsedTopics) ? parsedTopics : [],
-      };
-    });
-
-    res.json(modules);
+    res.json(result.rows);
   } catch (err) {
     console.error("ERROR GET MODULES:", err);
     res.status(500).json({ error: err.message });
@@ -539,16 +545,31 @@ app.get("/api/courses/:id/progress/:userId", async (req, res) => {
   const courseId = req.params.id;
   const userId = req.params.userId;
 
-  const total = await pool.query("SELECT COUNT(*) FROM modules WHERE course_id=$1", [courseId]);
+  const userResult = await pool.query(`SELECT kelas FROM users WHERE id = $1`, [userId]);
+
+  const kelas = userResult.rows[0]?.kelas;
+
+  const total = await pool.query(
+    `
+    SELECT COUNT(*)
+    FROM modules
+    WHERE course_id = $1
+    AND LOWER(TRIM(kelas)) = LOWER(TRIM($2))
+    `,
+    [courseId, kelas]
+  );
 
   const complete = await pool.query(
-    `SELECT COUNT(*) 
-     FROM module_progress mp
-     JOIN modules m ON mp.module_id = m.id
-     WHERE mp.siswa_id=$1
-     AND m.course_id=$2
-     AND mp.is_completed=true`,
-    [userId, courseId]
+    `
+    SELECT COUNT(*) 
+    FROM module_progress mp
+    JOIN modules m ON mp.module_id = m.id
+    WHERE mp.siswa_id = $1
+    AND m.course_id = $2
+    AND LOWER(TRIM(m.kelas)) = LOWER(TRIM($3)) -- 🔥 TAMBAH INI
+    AND mp.is_completed = true
+    `,
+    [userId, courseId, kelas]
   );
 
   const totalModules = parseInt(total.rows[0].count);
@@ -1146,6 +1167,30 @@ app.put("/api/materials/:id", authenticateToken, authorizeRole(["guru"]), upload
   }
 });
 
+app.delete("/api/materials/:id", authenticateToken, authorizeRole(["guru"]), async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const result = await pool.query(
+      `
+      DELETE FROM materi
+      WHERE id = $1
+      RETURNING *
+      `,
+      [id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ message: "Materi tidak ditemukan" });
+    }
+
+    res.json({ message: "Materi berhasil dihapus", data: result.rows[0] });
+  } catch (err) {
+    console.log("DELETE ERROR:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.get("/api/modules/:id/materials", async (req, res) => {
   try {
     const moduleId = req.params.id;
@@ -1249,26 +1294,15 @@ app.get("/api/quizzes", authenticateToken, authorizeRole(["guru"]), async (req, 
 
 app.post("/api/quizzes", authenticateToken, authorizeRole(["guru"]), async (req, res) => {
   try {
-    const { title, kelas, description, totalQuestions, duration, questionTypes, status } = req.body;
+    // PASTIKAN ada 'kkm' di dalam kurung kurawal ini
+    const { title, kelas, description, totalQuestions, duration, questionTypes, status, kkm } = req.body;
 
     const result = await pool.query(
       `
       INSERT INTO quizzes
       (title, kelas, description, total_questions, duration, question_types, status, created_by, kkm)
       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
-      RETURNING
-      id,
-      title,
-      kelas,
-      description,
-      total_questions AS "totalQuestions",
-      duration,
-      question_types AS "questionTypes",
-      status,
-      created_at AS "createdAt",
-      kkm,
-      0 AS submissions,
-      0 AS "averageScore"
+      RETURNING *
       `,
       [
         title,
@@ -1279,7 +1313,7 @@ app.post("/api/quizzes", authenticateToken, authorizeRole(["guru"]), async (req,
         JSON.stringify(questionTypes || []),
         status || "draft",
         req.user.id,
-        kkm || 75, // default kalau kosong
+        kkm || 75, // Sekarang ini tidak akan error lagi
       ]
     );
 
@@ -1668,6 +1702,33 @@ app.delete("/api/questions/:id", authenticateToken, authorizeRole(["guru"]), asy
     res.status(500).json({ error: err.message });
   } finally {
     client.release();
+  }
+});
+
+app.get("/api/student/total-materi", authenticateToken, async (req, res) => {
+  try {
+    const userId = req.user.id;
+
+    const userResult = await pool.query(`SELECT kelas FROM users WHERE id = $1`, [userId]);
+
+    const kelas = userResult.rows[0]?.kelas;
+
+    const result = await pool.query(
+      `
+      SELECT COUNT(mt.id)
+      FROM materi mt
+      JOIN modules m ON m.id = mt.module_id
+      WHERE LOWER(TRIM(m.kelas)) = LOWER(TRIM($1))
+      `,
+      [kelas]
+    );
+
+    res.json({
+      total: parseInt(result.rows[0].count) || 0,
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: err.message });
   }
 });
 
@@ -2256,6 +2317,46 @@ app.get("/api/projects", authenticateToken, authorizeRole(["guru"]), async (req,
   try {
     const result = await pool.query(
       `
+      WITH group_stage_progress AS (
+        SELECT
+          p.id AS project_id,
+          pg.id AS group_id,
+          COUNT(pst.id)::int AS total_stages,
+          COUNT(
+            CASE WHEN pss.status = 'selesai' THEN 1 END
+          )::int AS completed_stages
+        FROM projects p
+        JOIN kelas k ON k.id = p.class_id
+        LEFT JOIN project_groups pg
+          ON pg.project_id = p.id
+        LEFT JOIN project_syntaxes psy
+          ON psy.project_id = p.id
+        LEFT JOIN project_stages pst
+          ON pst.syntax_id = psy.id
+        LEFT JOIN project_stage_submissions pss
+          ON pss.stage_id = pst.id
+         AND pss.group_id = pg.id
+        WHERE p.created_by = $1
+        GROUP BY p.id, pg.id
+      ),
+      project_summary AS (
+        SELECT
+          project_id,
+          COUNT(group_id)::int AS group_count,
+          COALESCE(
+            ROUND(
+              AVG(
+                CASE
+                  WHEN total_stages = 0 THEN 0
+                  ELSE completed_stages * 100.0 / total_stages
+                END
+              )
+            ),
+            0
+          )::int AS progress
+        FROM group_stage_progress
+        GROUP BY project_id
+      )
       SELECT
         p.id,
         p.title,
@@ -2266,30 +2367,18 @@ app.get("/api/projects", authenticateToken, authorizeRole(["guru"]), async (req,
         p.description,
         p.members_per_group AS "membersPerGroup",
         p.created_at AS "createdAt",
-    
-        COUNT(qs.id) AS total,
-        COUNT(CASE WHEN qs.status = 'graded' THEN 1 END) AS graded,
-    
-        ROUND(
-          COUNT(CASE WHEN qs.status = 'graded' THEN 1 END) * 100.0
-          / NULLIF(COUNT(qs.id), 0)
-        ) AS progress,
-    
+        COALESCE(ps.progress, 0) AS progress,
+        COALESCE(ps.group_count, 0) AS "groupCount",
         CASE
-          WHEN COUNT(qs.id) > 0
-           AND COUNT(qs.id) = COUNT(CASE WHEN qs.status = 'graded' THEN 1 END)
-          THEN 'completed'
-          ELSE 'active'
-        END AS status
-    
+        WHEN p.status = 'completed' THEN 'completed'
+        WHEN COALESCE(ps.group_count, 0) = 0 THEN 'not_started'
+        ELSE 'active'
+      END AS status
       FROM projects p
       JOIN kelas k ON k.id = p.class_id
-      LEFT JOIN quizzes q ON q.kelas = k.nama
-      LEFT JOIN quiz_submissions qs ON qs.quiz_id = q.id
-    
+      LEFT JOIN project_summary ps
+        ON ps.project_id = p.id
       WHERE p.created_by = $1
-    
-      GROUP BY p.id, k.nama
       ORDER BY p.created_at DESC
       `,
       [req.user.id]
@@ -2338,54 +2427,83 @@ app.post("/api/projects", authenticateToken, authorizeRole(["guru"]), async (req
     const defaultSyntaxes = [
       {
         syntaxNo: 1,
-        title: "Sintaks 1: Identifikasi Masalah",
+        title: "Sintaks 1: Orientasi pada Masalah",
         description: "Mengidentifikasi masalah yang akan diselesaikan",
         stages: [
-          { stageNo: 1, title: "Tahap 1: Orientasi", subtitle: "Memahami konteks permasalahan", instruction: "Jelaskan konteks masalah.", allowFileUpload: false },
-          { stageNo: 2, title: "Tahap 2: Rencana", subtitle: "Merumuskan rencana secara jelas", instruction: "Jelaskan rencana penyelesaian masalah.", allowFileUpload: true },
-          { stageNo: 3, title: "Tahap 3: Memvalidasi", subtitle: "Validasi dan kelengkapan", instruction: "Tuliskan indikator keberhasilan.", allowFileUpload: false },
-          { stageNo: 4, title: "Tahap 4: Analisis", subtitle: "Analisis permasalahan", instruction: "Analisis kebutuhan dan proses.", allowFileUpload: false },
+          { stageNo: 1, title: "Tahap 1: Orientasi", subtitle: "Memahami konteks permasalahan", instruction: "Bacalah studi kasus yang diberikan dan jelaskan konteks permasalahan.", allowFileUpload: false },
+          { stageNo: 2, title: "Tahap 2: Identifikasi Masalah", subtitle: "Mengidentifikasi masalah utama", instruction: "Tuliskan masalah utama yang terjadi pada studi kasus tersebut.", allowFileUpload: true },
+          { stageNo: 3, title: "Tahap 3: Analisis Dampak", subtitle: "Menganalisis dampak permasalahan", instruction: "Jelaskan dampak yang terjadi jika masalah tidak diselesaikan.", allowFileUpload: false },
         ],
       },
       {
         syntaxNo: 2,
-        title: "Sintaks 2: Perencanaan Proyek",
+        title: "Sintaks 2: Pengorganisasian Peserta Didik",
         description: "Membuat perencanaan proyek secara detail",
         stages: [
-          { stageNo: 1, title: "Tahap 1: Tujuan dan Deskripsi Proyek", subtitle: "Menentukan tujuan proyek", instruction: "Tuliskan tujuan dan deskripsi proyek.", allowFileUpload: false },
-          { stageNo: 2, title: "Tahap 2: Menentukan Fitur Proyek", subtitle: "Menentukan fitur utama", instruction: "Tuliskan fitur utama proyek.", allowFileUpload: false },
-          { stageNo: 3, title: "Tahap 3: Menentukan Tools & Bahasa", subtitle: "Memilih tools dan bahasa", instruction: "Tuliskan tools dan bahasa yang digunakan.", allowFileUpload: false },
+          { stageNo: 1, title: "Tahap 1: Menentukan Solusi", subtitle: "Menentukan solusi program", instruction: "Tentukan solusi yang akan dibuat dalam bentuk program Python sederhana..", allowFileUpload: false },
+          { stageNo: 2, title: "Tahap 2: Menentukan Kebutuhan Program", subtitle: "Menentukan input, proses, dan output", instruction: "Tentukan Input, Proses, dan Output.", allowFileUpload: false },
+          {
+            stageNo: 3,
+            title: "Tahap 3: Menentukan Logika Program",
+            subtitle: "Menentukan penggunaan percabangan dan perulangan",
+            instruction: "Tentukan bagian program yang menggunakan: Percabangan (if/else), Perulangan (for/while).",
+            allowFileUpload: false,
+          },
         ],
       },
       {
         syntaxNo: 3,
-        title: "Sintaks 3: Penyusunan Jadwal",
+        title: "Sintaks 3: Penyelidikan (Perancangan Solusi)",
         description: "Menyusun timeline dan jadwal pengerjaan",
         stages: [
-          { stageNo: 1, title: "Tahap 1: Menentukan Durasi Proyek", subtitle: "Menentukan durasi proyek", instruction: "Tuliskan estimasi durasi proyek.", allowFileUpload: false },
-          { stageNo: 2, title: "Tahap 2: Pembagian Tugas Anggota", subtitle: "Membagi tugas anggota", instruction: "Jelaskan pembagian tugas anggota.", allowFileUpload: false },
-          { stageNo: 3, title: "Tahap 3: Menyusun Timeline", subtitle: "Membuat timeline detail", instruction: "Tuliskan timeline pengerjaan proyek.", allowFileUpload: false },
+          { stageNo: 1, title: "Menyusun Algoritma", subtitle: "Menyusun langkah penyelesaian masalah", instruction: "Tuliskan langkah-langkah penyelesaian masalah secara runtut.", allowFileUpload: false },
+          { stageNo: 2, title: "Mengembangkan Solusi", subtitle: "Merinci alur program", instruction: "Jelaskan secara lebih rinci bagaimana program akan berjalan dari input hingga menghasilkan output.", allowFileUpload: false },
+          {
+            stageNo: 3,
+            title: "Validasi Rancangan",
+            subtitle: "Memastikan solusi sudah sesuai",
+            instruction:
+              "Periksa kembali solusi yang telah dibuat dengan menjawab: 1. Apakah langkah-langkah sudah sesuai dengan masalah?, 2. Apakah semua kebutuhan (input, proses, output) sudah terpenuhi?, 3. Apakah solusi dapat dijalankan dalam program Python?, 4. Jika belum, bagian mana yang perlu diperbaiki?",
+            allowFileUpload: false,
+          },
         ],
       },
       {
         syntaxNo: 4,
-        title: "Sintaks 4: Pelaksanaan Proyek",
+        title: "Sintaks 4:Pengembangan & Penyajian Hasil",
         description: "Mengimplementasikan proyek sesuai rencana",
         stages: [
-          { stageNo: 1, title: "Tahap 1: Log Aktivitas 1", subtitle: "Catatan aktivitas pengerjaan", instruction: "Tuliskan aktivitas pelaksanaan proyek.", allowFileUpload: false },
-          { stageNo: 2, title: "Tahap 2: Log Aktivitas 2", subtitle: "Catatan aktivitas lanjutan", instruction: "Tuliskan aktivitas lanjutan.", allowFileUpload: false },
-          { stageNo: 3, title: "Tahap 3: Log Aktivitas 3", subtitle: "Catatan perkembangan proyek", instruction: "Tuliskan perkembangan proyek.", allowFileUpload: false },
-          { stageNo: 4, title: "Tahap 4: Log Aktivitas 4", subtitle: "Finalisasi pelaksanaan", instruction: "Tuliskan finalisasi pelaksanaan proyek.", allowFileUpload: false },
+          {
+            stageNo: 1,
+            title: "Membuat Program",
+            subtitle: "Mengimplementasikan solusi ke dalam kode",
+            instruction: "Buat program Python sesuai algoritma yang telah dibuat. Tuliskan kode program dan sertakan penjelasan singkat tentang cara kerja program.",
+            allowFileUpload: false,
+          },
+          {
+            stageNo: 2,
+            title: "Pengujian Program",
+            subtitle: "Menguji hasil program",
+            instruction: "Uji coba program yang telah dibuat dengan beberapa data input. Tuliskan hasil pengujian dan jelaskan apakah program berjalan dengan benar.",
+            allowFileUpload: false,
+          },
+          {
+            stageNo: 3,
+            title: "Presentasi Hasil",
+            subtitle: "Menyajikan hasil program",
+            instruction: "Jelaskan hasil program yang telah dibuat berupa PDF, meliputi:1. Tujuan program, 2.Cara kerja program, 3. Penggunaan percabangan dan perulangan, 4. Hasil output program",
+            allowFileUpload: false,
+          },
         ],
       },
       {
         syntaxNo: 5,
-        title: "Sintaks 5: Evaluasi & Refleksi",
+        title: "Sintaks 5: Analisis & Evaluasi",
         description: "Melakukan evaluasi dan refleksi proyek",
         stages: [
-          { stageNo: 1, title: "Tahap 1: Evaluasi Hasil", subtitle: "Evaluasi hasil proyek", instruction: "Tuliskan evaluasi hasil proyek.", allowFileUpload: false },
-          { stageNo: 2, title: "Tahap 2: Revisi Proyek", subtitle: "Melakukan revisi bila perlu", instruction: "Tuliskan revisi yang dilakukan.", allowFileUpload: false },
-          { stageNo: 3, title: "Tahap 3: Refleksi Pembelajaran", subtitle: "Refleksi proses belajar", instruction: "Tuliskan refleksi pembelajaran.", allowFileUpload: false },
+          { stageNo: 1, title: "Evaluasi Hasil", subtitle: "Menilai keberhasilan solusi", instruction: "Jelaskan apakah program sudah menyelesaikan masalah.", allowFileUpload: false },
+          { stageNo: 2, title: "Perbaikan Program", subtitle: "Mengidentifikasi kekurangan", instruction: "Tuliskan kekurangan program dan perbaikan yang bisa dilakukan.", allowFileUpload: false },
+          { stageNo: 3, title: "Refleksi Pembelajaran", subtitle: "Merefleksikan proses belajar", instruction: "Tuliskan:1. Apa yang dipelajari, 2. Kesulitan yang dialami, 3. Cara mengatasinya ", allowFileUpload: false },
         ],
       },
     ];
@@ -2463,6 +2581,7 @@ app.get("/api/student/projects", authenticateToken, authorizeRole(["siswa"]), as
       FROM projects p
       JOIN kelas k ON k.id = p.class_id
       WHERE k.nama = $1
+AND p.status = 'active'
       ORDER BY p.created_at DESC
       `,
       [siswa.kelas]
@@ -2651,14 +2770,47 @@ app.post("/api/student/projects/:projectId/group/members", authenticateToken, au
     } else {
       groupId = groupResult.rows[0].id;
     }
-    if (isNewGroup) {
+
+    // Kalau group baru dan siswa yang dipilih BUKAN user login,
+    // user login tetap dimasukkan dulu sebagai anggota biasa
+    if (isNewGroup && Number(selectedStudent.id) !== Number(req.user.id)) {
       await client.query(
         `
         INSERT INTO project_group_members (group_id, student_id, role, member_role)
-        VALUES ($1, $2, 'Ketua', 'Project Leader')
+        VALUES ($1, $2, 'Anggota', 'Member')
         `,
         [groupId, req.user.id]
       );
+    }
+
+    const duplicateResult = await client.query(
+      `
+      SELECT id
+      FROM project_group_members
+      WHERE group_id = $1 AND student_id = $2
+      `,
+      [groupId, studentId]
+    );
+
+    if (duplicateResult.rows.length > 0) {
+      await client.query("ROLLBACK");
+      return res.status(400).json({ message: "Siswa sudah ada di kelompok" });
+    }
+
+    const ketuaResult = await client.query(
+      `
+      SELECT COUNT(*)::int AS total
+      FROM project_group_members
+      WHERE group_id = $1 AND role = 'Ketua'
+      `,
+      [groupId]
+    );
+
+    const totalKetua = ketuaResult.rows[0].total;
+
+    if ((status || "Anggota") === "Ketua" && totalKetua > 0) {
+      await client.query("ROLLBACK");
+      return res.status(400).json({ message: "Ketua kelompok sudah ada" });
     }
 
     const countResult = await client.query(
@@ -2677,36 +2829,6 @@ app.post("/api/student/projects/:projectId/group/members", authenticateToken, au
       return res.status(400).json({
         message: `Maksimal anggota kelompok ${project.membersPerGroup} orang`,
       });
-    }
-
-    const ketuaResult = await client.query(
-      `
-      SELECT COUNT(*)::int AS total
-      FROM project_group_members
-      WHERE group_id = $1 AND role = 'Ketua'
-      `,
-      [groupId]
-    );
-
-    const totalKetua = ketuaResult.rows[0].total;
-
-    if (status === "Ketua" && totalKetua > 0) {
-      await client.query("ROLLBACK");
-      return res.status(400).json({ message: "Ketua kelompok sudah ada" });
-    }
-
-    const duplicateResult = await client.query(
-      `
-      SELECT id
-      FROM project_group_members
-      WHERE group_id = $1 AND student_id = $2
-      `,
-      [groupId, studentId]
-    );
-
-    if (duplicateResult.rows.length > 0) {
-      await client.query("ROLLBACK");
-      return res.status(400).json({ message: "Siswa sudah ada di kelompok" });
     }
 
     const insertResult = await client.query(
@@ -2926,6 +3048,27 @@ app.get("/api/student/projects/:projectId/detail", authenticateToken, authorizeR
 
     const group = groupResult.rows[0];
 
+    const finalSubmissionResult = await pool.query(
+      `
+      SELECT
+        id,
+        file_name AS "fileName",
+        file_url AS "fileUrl",
+        file_size AS "fileSize",
+        status,
+        final_score AS "finalScore",
+        teacher_note AS "teacherNote",
+        submitted_at AS "submittedAt"
+      FROM project_final_submissions
+      WHERE project_id = $1
+        AND group_id = $2
+      LIMIT 1
+      `,
+      [projectId, group.id]
+    );
+
+    const finalSubmission = finalSubmissionResult.rows[0] || null;
+
     const finalStageResult = await pool.query(
       `
       SELECT
@@ -3103,9 +3246,10 @@ app.get("/api/student/projects/:projectId/detail", authenticateToken, authorizeR
         description: project.description,
         deadline: project.deadline || null,
         groupName: group.groupName,
-        status: finalStage?.status === "selesai" ? "Dinilai" : finalStage?.status === "belum_selesai" ? "Sedang Dikerjakan" : finalStage?.status === "belum_mengerjakan" ? "Belum Dikerjakan" : project.status,
-        score: finalStage?.score ?? null,
-        submittedAt: finalStage?.submittedAt ?? null,
+        status: finalSubmission?.status || project.status,
+        score: finalSubmission?.finalScore ?? null,
+        submittedAt: finalSubmission?.submittedAt ?? null,
+        finalSubmission,
       },
       teamMembers: membersResult.rows.map((m) => ({
         ...m,
@@ -4059,17 +4203,17 @@ app.post("/api/student/projects/:projectId/final-submit", authenticateToken, aut
               updated_at = NOW()
           WHERE id = $5
           RETURNING *
-          `,
+        `,
         [req.file.originalname, req.file.filename, req.file.size, status, existingResult.rows[0].id]
       );
     } else {
       result = await client.query(
         `
           INSERT INTO project_final_submissions
-          (project_id, student_id, group_id, submitted_at, file_name, file_url, file_size, status)
-          VALUES ($1,$2,$3,NOW(),$4,$5,$6,$7)
+          (project_id, student_id, group_id, submitted_at, file_name, file_url, file_size, status, created_at, updated_at)
+          VALUES ($1,$2,$3,NOW(),$4,$5,$6,$7,NOW(),NOW())
           RETURNING *
-          `,
+        `,
         [projectId, studentId, groupId, req.file.originalname, req.file.filename, req.file.size, status]
       );
     }
@@ -4082,8 +4226,18 @@ app.post("/api/student/projects/:projectId/final-submit", authenticateToken, aut
     });
   } catch (err) {
     await client.query("ROLLBACK");
+
     console.error("FINAL SUBMIT ERROR:", err);
-    res.status(500).json({ error: err.message });
+    console.error("ERROR MESSAGE:", err.message);
+    console.error("ERROR DETAIL:", err.detail);
+    console.error("ERROR CODE:", err.code);
+
+    res.status(500).json({
+      message: "Final submit gagal",
+      error: err.message,
+      detail: err.detail,
+      code: err.code,
+    });
   } finally {
     client.release();
   }
@@ -4255,38 +4409,29 @@ app.get("/api/guru/projects/:projectId/review-submissions", authenticateToken, a
     const rowsResult = await pool.query(
       `
       SELECT
-        pss.id,
+        pfs.id,
         p.id AS "projectId",
         p.title AS "projectTitle",
         p.deadline AS deadline,
         pg.id AS "groupId",
-        COALESCE(pg.group_name, 'Kelompok') AS title,
+        COALESCE(pg.group_name, u.nama, 'Submission') AS title,
         COALESCE(k.nama, '-') AS subtitle,
-        pss.submitted_at AS "submittedAt",
-        CASE
-          WHEN pss.status = 'selesai' THEN 'graded'
-          WHEN pss.submitted_at > p.deadline THEN 'late'
-          ELSE 'pending'
-        END AS status,
-        pss.score AS "finalScore",
-        psf.file_name AS "fileName",
-        psf.file_url AS "fileUrl",
-        psf.file_size AS "fileSize",
-        pst.stage_no AS "stageNo",
-        psy.syntax_no AS "syntaxNo"
-      FROM project_stage_files psf
-      JOIN project_stage_submissions pss ON pss.id = psf.submission_id
-      JOIN project_stages pst ON pst.id = pss.stage_id
-      JOIN project_syntaxes psy ON psy.id = pst.syntax_id
-      JOIN projects p ON p.id = psy.project_id
-      LEFT JOIN project_groups pg ON pg.id = pss.group_id
-      LEFT JOIN kelas k ON k.id = p.class_id
+        pfs.submitted_at AS "submittedAt",
+        pfs.status,
+        pfs.final_score AS "finalScore",
+        pfs.file_name AS "fileName",
+        pfs.file_url AS "fileUrl",
+        pfs.file_size AS "fileSize"
+      FROM project_final_submissions pfs
+      JOIN projects p ON p.id = pfs.project_id
+      JOIN kelas k ON k.id = p.class_id
+      LEFT JOIN project_groups pg ON pg.id = pfs.group_id
+      LEFT JOIN users u ON u.id = pfs.student_id
       WHERE p.id = $1
-        AND psy.syntax_no = 4
-        AND pst.stage_no = 4
-      ORDER BY pss.submitted_at DESC
+        AND p.created_by = $2
+      ORDER BY pfs.submitted_at DESC
       `,
-      [projectId]
+      [projectId, req.user.id]
     );
 
     let rows = rowsResult.rows;
@@ -4328,43 +4473,31 @@ app.get("/api/guru/project-submissions/:submissionId", authenticateToken, author
     const submissionResult = await pool.query(
       `
       SELECT
-        pss.id,
+        pfs.id,
         p.id AS "projectId",
         p.title AS "projectTitle",
         p.deadline AS deadline,
         k.nama AS "className",
         pg.id AS "groupId",
         pg.group_name AS "groupName",
-        pss.submitted_at AS "submittedAt",
-        CASE
-          WHEN pss.status = 'selesai' THEN 'graded'
-          WHEN pss.submitted_at > p.deadline THEN 'late'
-          ELSE 'pending'
-        END AS status,
-        fb.feedback_text AS "teacherNote",
-        pss.score AS "finalScore",
-        psf.file_name AS "fileName",
-        psf.file_url AS "fileUrl",
-        psf.file_size AS "fileSize"
-      FROM project_stage_submissions pss
-      JOIN project_stages pst ON pst.id = pss.stage_id
-      JOIN project_syntaxes psy ON psy.id = pst.syntax_id
-      JOIN projects p ON p.id = psy.project_id
+        pfs.student_id AS "studentId",
+        u.nama AS "studentName",
+        pfs.submitted_at AS "submittedAt",
+        pfs.status,
+        pfs.teacher_note AS "teacherNote",
+        pfs.final_score AS "finalScore",
+        pfs.file_name AS "fileName",
+        pfs.file_url AS "fileUrl",
+        pfs.file_size AS "fileSize"
+      FROM project_final_submissions pfs
+      JOIN projects p ON p.id = pfs.project_id
       JOIN kelas k ON k.id = p.class_id
-      JOIN project_groups pg ON pg.id = pss.group_id
-      LEFT JOIN project_stage_feedback fb ON fb.submission_id = pss.id
-      LEFT JOIN LATERAL (
-        SELECT file_name, file_url, file_size
-        FROM project_stage_files
-        WHERE submission_id = pss.id
-        ORDER BY id DESC
-        LIMIT 1
-      ) psf ON true
-      WHERE pss.id = $1
-        AND psy.syntax_no = 4
-        AND pst.stage_no = 4
+      LEFT JOIN project_groups pg ON pg.id = pfs.group_id
+      LEFT JOIN users u ON u.id = pfs.student_id
+      WHERE pfs.id = $1
+        AND p.created_by = $2
       `,
-      [submissionId]
+      [submissionId, req.user.id]
     );
 
     if (submissionResult.rows.length === 0) {
@@ -4457,17 +4590,13 @@ app.put("/api/guru/project-submissions/:submissionId/grade", authenticateToken, 
     const submissionCheck = await client.query(
       `
       SELECT
-        pss.id,
-        pss.status,
-        p.id AS "projectId"
-      FROM project_stage_submissions pss
-      JOIN project_stages pst ON pst.id = pss.stage_id
-      JOIN project_syntaxes psy ON psy.id = pst.syntax_id
-      JOIN projects p ON p.id = psy.project_id
-      WHERE pss.id = $1
+        pfs.id,
+        pfs.status,
+        pfs.project_id AS "projectId"
+      FROM project_final_submissions pfs
+      JOIN projects p ON p.id = pfs.project_id
+      WHERE pfs.id = $1
         AND p.created_by = $2
-        AND psy.syntax_no = 4
-        AND pst.stage_no = 4
       `,
       [submissionId, req.user.id]
     );
@@ -4564,34 +4693,21 @@ app.put("/api/guru/project-submissions/:submissionId/grade", authenticateToken, 
       );
     }
 
-    const finalScore = normalizedRubrics.reduce((total, item) => {
-      return total + (item.score * item.weight) / 100;
-    }, 0);
+    const finalScore = calculateWeightedScore(normalizedRubrics);
 
     await client.query(
       `
-      INSERT INTO project_stage_feedback (submission_id, teacher_id, feedback_text, created_at, updated_at)
-      VALUES ($1, $2, $3, NOW(), NOW())
-      ON CONFLICT (submission_id)
-      DO UPDATE SET
-        teacher_id = EXCLUDED.teacher_id,
-        feedback_text = EXCLUDED.feedback_text,
-        updated_at = NOW()
-      `,
-      [submissionId, req.user.id, teacherNote || null]
-    );
-
-    await client.query(
-      `
-      UPDATE project_stage_submissions
-      SET status = 'selesai',
-          score = $1,
+      UPDATE project_final_submissions
+      SET status = 'graded',
+          final_score = $1,
+          teacher_note = $2,
+          graded_at = NOW(),
+          graded_by = $3,
           updated_at = NOW()
-      WHERE id = $2
+      WHERE id = $4
       `,
-      [Number(finalScore.toFixed(2)), submissionId]
+      [Number(finalScore.toFixed(2)), teacherNote || "", req.user.id, submissionId]
     );
-
     await client.query("COMMIT");
 
     res.json({
@@ -4716,37 +4832,29 @@ app.get("/api/student/grades/overview", authenticateToken, authorizeRole(["siswa
     const projectResult = await pool.query(
       `
       SELECT
-        pss.id AS submission_id,
+        pfs.id AS submission_id,
         p.id AS project_id,
         p.title,
         p.description,
         p.type,
         p.created_at,
-        pss.submitted_at,
-        pss.status,
-        COALESCE(pss.score, 0) AS final_score,
-        psf.feedback_text AS teacher_note,
+        pfs.submitted_at,
+        pfs.status,
+        COALESCE(pfs.final_score, 0) AS final_score,
+        pfs.teacher_note,
         guru.nama AS teacher_name
-      FROM project_stage_submissions pss
-      JOIN project_stages pst
-        ON pst.id = pss.stage_id
-      JOIN project_syntaxes psy
-        ON psy.id = pst.syntax_id
-      JOIN projects p
-        ON p.id = psy.project_id
-      LEFT JOIN project_stage_feedback psf
-        ON psf.submission_id = pss.id
-      LEFT JOIN users guru
-        ON guru.id = p.created_by
-      WHERE psy.syntax_no = 4
-        AND pst.stage_no = 4
-        AND pss.group_id IN (
+      FROM project_final_submissions pfs
+      JOIN projects p ON p.id = pfs.project_id
+      LEFT JOIN users guru ON guru.id = p.created_by
+      WHERE (
+        pfs.student_id = $1
+        OR pfs.group_id IN (
           SELECT pgm.group_id
           FROM project_group_members pgm
           WHERE pgm.student_id = $1
         )
-        AND pss.score IS NOT NULL
-      ORDER BY pss.submitted_at DESC NULLS LAST, p.created_at DESC
+      )
+      ORDER BY pfs.submitted_at DESC NULLS LAST, p.created_at DESC
       `,
       [siswaId]
     );
@@ -4915,27 +5023,22 @@ app.get("/api/guru/students/:studentId/grades-detail", authenticateToken, author
     const projectResult = await pool.query(
       `
       SELECT
-        pss.id::text AS "submissionId",
+        pfs.id::text AS "submissionId",
         p.id::text AS id,
         p.title AS "projectTitle",
-        COALESCE(pss.score, 0)::float AS score,
+        COALESCE(pfs.final_score, 0)::float AS score,
         100::float AS "maxScore",
-        TO_CHAR(COALESCE(pss.submitted_at, p.created_at), 'DD Mon YYYY') AS date
-      FROM project_stage_submissions pss
-      JOIN project_stages pst
-        ON pst.id = pss.stage_id
-      JOIN project_syntaxes psy
-        ON psy.id = pst.syntax_id
-      JOIN projects p
-        ON p.id = psy.project_id
-      JOIN project_group_members pgm
-        ON pgm.group_id = pss.group_id
-      WHERE pgm.student_id = $1
-        AND p.created_by = $2
-        AND psy.syntax_no = 4
-        AND pst.stage_no = 4
-        AND pss.score IS NOT NULL
-      ORDER BY COALESCE(pss.submitted_at, p.created_at) DESC
+        TO_CHAR(COALESCE(pfs.submitted_at, p.created_at), 'DD Mon YYYY') AS date
+      FROM project_final_submissions pfs
+      JOIN projects p ON p.id = pfs.project_id
+      LEFT JOIN project_group_members pgm ON pgm.group_id = pfs.group_id
+      WHERE p.created_by = $2
+        AND (
+          pfs.student_id = $1
+          OR pgm.student_id = $1
+        )
+        AND pfs.final_score IS NOT NULL
+      ORDER BY COALESCE(pfs.submitted_at, p.created_at) DESC
       `,
       [studentId, teacherId]
     );
@@ -4948,7 +5051,7 @@ app.get("/api/guru/students/:studentId/grades-detail", authenticateToken, author
           SELECT
             par.name,
             COALESCE(psrs.score, 0)::float AS score,
-            100::float AS "maxScore"
+            4::float AS "maxScore"
           FROM project_assessment_rubrics par
           LEFT JOIN project_submission_rubric_scores psrs
             ON psrs.rubric_id = par.id
@@ -5347,6 +5450,9 @@ app.get("/api/guru/kkm", authenticateToken, authorizeRole(["guru"]), async (req,
 
 app.get("/api/student/latest-activities", authenticateToken, authorizeRole(["siswa"]), async (req, res) => {
   try {
+    console.log("LOGIN USER ID:", req.user.id);
+    console.log("REQ.USER:", req.user);
+
     const studentResult = await pool.query(
       `
       SELECT id, kelas
@@ -5496,7 +5602,9 @@ app.get("/api/student/latest-activities", authenticateToken, authorizeRole(["sis
 
 app.get("/api/student/recent-learning", authenticateToken, authorizeRole(["siswa"]), async (req, res) => {
   try {
-    const siswaId = req.user.id;
+    const userResult = await pool.query(`SELECT kelas FROM users WHERE id = $1`, [siswaId]);
+
+    const kelas = userResult.rows[0]?.kelas;
 
     const result = await pool.query(
       `
@@ -5515,10 +5623,11 @@ app.get("/api/student/recent-learning", authenticateToken, authorizeRole(["siswa
       LEFT JOIN progress_siswa ps
         ON ps.materi_id = m.id
        AND ps.siswa_id = $1
+      WHERE LOWER(TRIM(mo.kelas)) = LOWER(TRIM($2)) -- 🔥 INI FIX
       ORDER BY COALESCE(ps.updated_at, m.created_at) DESC
       LIMIT 3
       `,
-      [siswaId]
+      [siswaId, kelas]
     );
 
     const data = result.rows.map((row) => ({
@@ -5538,6 +5647,7 @@ app.get("/api/student/recent-learning", authenticateToken, authorizeRole(["siswa
     res.json(data);
   } catch (err) {
     console.error("GET RECENT LEARNING ERROR:", err);
+
     res.status(500).json({
       message: "Gagal mengambil pembelajaran terbaru",
       error: err.message,
@@ -5585,13 +5695,19 @@ app.get("/api/student/learning-distribution", authenticateToken, authorizeRole([
   try {
     const siswaId = req.user.id;
 
+    // 🔥 ambil kelas siswa dulu
+    const userResult = await pool.query(`SELECT kelas FROM users WHERE id = $1`, [siswaId]);
+
+    const kelas = userResult.rows[0]?.kelas;
+
     const materiResult = await pool.query(
       `
-      SELECT COUNT(*)::int AS total
-      FROM progress_siswa
-      WHERE siswa_id = $1
+      SELECT COUNT(mt.id)
+      FROM materi mt
+      JOIN modules m ON m.id = mt.module_id
+      WHERE LOWER(TRIM(m.kelas)) = LOWER(TRIM($1))
       `,
-      [siswaId]
+      [kelas]
     );
 
     const quizResult = await pool.query(
@@ -5785,6 +5901,35 @@ app.get("/api/guru/deadline-terdekat", authenticateToken, authorizeRole(["guru"]
   } catch (err) {
     console.error("DEADLINE ERROR:", err);
     res.status(500).json({ message: "Gagal ambil deadline" });
+  }
+});
+
+app.put("/api/projects/:id/end", authenticateToken, authorizeRole(["guru"]), async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const result = await pool.query(
+      `
+      UPDATE projects
+      SET status = 'completed'
+      WHERE id = $1
+        AND created_by = $2
+      RETURNING *
+      `,
+      [id, req.user.id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ message: "Project tidak ditemukan" });
+    }
+
+    res.json({
+      message: "Project berhasil diakhiri",
+      project: result.rows[0],
+    });
+  } catch (err) {
+    console.error("END PROJECT ERROR:", err);
+    res.status(500).json({ error: err.message });
   }
 });
 

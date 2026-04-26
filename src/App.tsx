@@ -191,7 +191,7 @@ export default function App() {
               </button>
 
               <Button onClick={() => setCurrentPage("login")} className={isScrolled ? "bg-blue-600 text-white hover:bg-blue-700" : "bg-white text-blue-600 hover:bg-yellow-300"}>
-                Login
+                Masuk
               </Button>
             </div>
 

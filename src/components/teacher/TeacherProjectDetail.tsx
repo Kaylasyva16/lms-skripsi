@@ -92,6 +92,53 @@ export default function TeacherProjectDetail({ project, onBack, onNavigate, onVi
     return <div className="p-8">Loading project detail...</div>;
   }
 
+  const handleEndProject = async () => {
+    if (!confirm("Yakin ingin mengakhiri project ini?")) return;
+
+    try {
+      const token = localStorage.getItem("token");
+
+      const res = await fetch(`http://localhost:5000/api/projects/${project.id}/end`, {
+        method: "PUT",
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        alert(data.message || "Gagal mengakhiri project");
+        return;
+      }
+
+      setProjectDetail((prev: any) => ({
+        ...prev,
+        status: "completed",
+      }));
+
+      alert("Project berhasil diakhiri");
+    } catch (err) {
+      console.error("END PROJECT ERROR:", err);
+      alert("Terjadi kesalahan saat mengakhiri project");
+    }
+  };
+
+  const getStatusLabel = (status: string) => {
+    if (status === "completed") return "Akhir";
+    if (status === "active") return "Aktif";
+    if (status === "not_started") return "Belum Dimulai";
+    return status;
+  };
+
+  const getStatusClass = (status: string) => {
+    if (status === "completed") return "bg-red-500 text-white";
+    if (status === "active") return "bg-green-500 text-white";
+    if (status === "not_started") return "bg-yellow-500 text-white";
+    return "bg-gray-500 text-white";
+  };
+  const statusInfo = getStatusLabel(projectDetail?.status);
+
   return (
     <div className="p-0">
       <div className="mb-6">
@@ -124,7 +171,7 @@ export default function TeacherProjectDetail({ project, onBack, onNavigate, onVi
                   {projectDetail.class}
                 </Badge>
 
-                <Badge className={projectDetail.status === "active" ? "bg-green-500" : "bg-gray-500"}>{projectDetail.status === "active" ? "Aktif" : "Selesai"}</Badge>
+                <Badge className={getStatusClass(projectDetail.status)}>{getStatusLabel(projectDetail.status)}</Badge>
               </div>
             </div>
           </div>
@@ -183,7 +230,7 @@ export default function TeacherProjectDetail({ project, onBack, onNavigate, onVi
             </CardContent>
           </Card>
 
-          {projectDetail.status === "active" && (
+          {projectDetail.status !== "completed" && (
             <div className="space-y-3">
               <Button
                 className="w-full bg-blue-500 hover:bg-blue-600 h-11"
@@ -201,7 +248,7 @@ export default function TeacherProjectDetail({ project, onBack, onNavigate, onVi
                   <Edit className="w-4 h-4 mr-2" />
                   Edit
                 </Button>
-                <Button variant="outline" className="text-red-600 border-red-600 hover:bg-red-50 h-10">
+                <Button variant="outline" className="text-red-600 border-red-600 hover:bg-red-50 h-10" onClick={handleEndProject}>
                   <XCircle className="w-4 h-4 mr-2" />
                   Akhiri
                 </Button>

@@ -133,24 +133,38 @@ export default function TeacherMaterials({ onNavigate, onLogout }: TeacherMateri
 
   const fetchModules = async () => {
     try {
-      const res = await fetch("http://localhost:5000/api/courses/1/modules");
-      const data = await res.json();
-      const mapped = data.map(mapModuleFromApi);
-      setModules(mapped);
+      const token = localStorage.getItem("token");
+      const user = JSON.parse(localStorage.getItem("user") || "{}");
 
-      if (selectedModule) {
-        const updatedSelected = mapped.find((m: Module) => m.id === selectedModule.id) || null;
-        if (updatedSelected) {
-          setSelectedModule((prev) =>
-            prev
-              ? {
-                  ...updatedSelected,
-                  subMaterials: prev.subMaterials,
-                }
-              : updatedSelected
-          );
-        }
+      let url = `http://localhost:5000/api/courses/1/modules?siswaId=${user.id}`;
+
+      // 🔥 hanya siswa kirim kelas ke backend
+      if (user.role === "siswa" && user.kelas) {
+        url += `&kelas=${user.kelas}`;
       }
+
+      const res = await fetch(url, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      if (!res.ok) {
+        const text = await res.text();
+        console.log("FETCH MODULES ERROR:", text);
+        return;
+      }
+
+      const data = await res.json();
+
+      let mapped = data.map(mapModuleFromApi);
+
+      // 🔥 FILTER KHUSUS GURU
+      if (user.role === "guru" && user.kelas) {
+        mapped = mapped.filter((m) => m.class === user.kelas);
+      }
+
+      setModules(mapped);
     } catch (err) {
       console.error("Gagal fetch modules:", err);
     }
@@ -158,7 +172,20 @@ export default function TeacherMaterials({ onNavigate, onLogout }: TeacherMateri
 
   const fetchMaterials = async (moduleId: number) => {
     try {
-      const res = await fetch(`http://localhost:5000/api/modules/${moduleId}/materials`);
+      const token = localStorage.getItem("token");
+
+      const res = await fetch(`http://localhost:5000/api/modules/${moduleId}/materials`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      if (!res.ok) {
+        const text = await res.text();
+        console.log("FETCH MATERIALS ERROR:", text);
+        return;
+      }
+
       const data = await res.json();
       const mappedSubMaterials = data.map(mapSubMaterialFromApi);
 
@@ -187,7 +214,6 @@ export default function TeacherMaterials({ onNavigate, onLogout }: TeacherMateri
       console.error("Gagal fetch materials:", err);
     }
   };
-
   useEffect(() => {
     fetchModules();
   }, []);
@@ -326,18 +352,35 @@ export default function TeacherMaterials({ onNavigate, onLogout }: TeacherMateri
     }
   };
 
-  const handleDeleteSubMaterial = (subId: number) => {
+  const handleDeleteSubMaterial = async (subId: number) => {
     if (!selectedModule) return;
 
-    if (confirm("Apakah Anda yakin ingin menghapus sub-materi ini?")) {
-      const updatedModule = {
-        ...selectedModule,
-        subMaterials: selectedModule.subMaterials.filter((s) => s.id !== subId),
-        totalLessons: selectedModule.totalLessons - 1,
-      };
+    if (!confirm("Apakah Anda yakin ingin menghapus sub-materi ini?")) return;
 
-      setModules((prev) => prev.map((m) => (m.id === selectedModule.id ? updatedModule : m)));
-      setSelectedModule(updatedModule);
+    try {
+      const token = localStorage.getItem("token");
+
+      const res = await fetch(`http://localhost:5000/api/materials/${subId}`, {
+        method: "DELETE",
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      if (!res.ok) {
+        const text = await res.text();
+        console.log("DELETE MATERIAL ERROR:", text);
+        alert("Gagal menghapus materi");
+        return;
+      }
+
+      await fetchMaterials(selectedModule.id);
+      await fetchModules();
+
+      alert("Materi berhasil dihapus");
+    } catch (err) {
+      console.error(err);
+      alert("Terjadi kesalahan saat menghapus materi");
     }
   };
 

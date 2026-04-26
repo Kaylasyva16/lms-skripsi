@@ -6,7 +6,7 @@ import { Badge } from "../ui/badge";
 import { Avatar, AvatarFallback } from "../ui/avatar";
 import { Tabs, TabsList, TabsTrigger } from "../ui/tabs";
 import { Textarea } from "../ui/textarea";
-import { Slider } from "../ui/slider";
+
 import { Download, FileText, CheckCircle2, Clock, XCircle, Star, MessageSquare, ArrowLeft } from "lucide-react";
 
 interface TeacherEvaluationProps {
@@ -267,23 +267,18 @@ export default function TeacherEvaluation({ onNavigate, projectId }: TeacherEval
     }
   }, [selectedSubmissionId]);
 
-  const totalScore = useMemo(() => {
+  const totalRawScore = useMemo(() => {
     if (!detail) return 0;
 
-    const hasRubricScores = detail.rubrics?.some((rubric) => rubric.score !== null && rubric.score !== undefined);
-
-    if (!hasRubricScores) {
-      return Number(detail.finalScore ?? 0);
-    }
-
-    const total = detail.rubrics.reduce((acc, rubric) => {
-      const score = Number(scores[rubric.id] ?? rubric.score ?? 0);
-      const weight = Number(rubric.weight ?? 0);
-      return acc + (score * weight) / 100;
+    return detail.rubrics.reduce((acc, rubric) => {
+      return acc + Number(scores[rubric.id] ?? rubric.score ?? 0);
     }, 0);
-
-    return Math.round(total);
   }, [detail, scores]);
+
+  const totalScore = useMemo(() => {
+    if (!detail) return 0;
+    return Number(((totalRawScore / 28) * 100).toFixed(2));
+  }, [detail, totalRawScore]);
 
   const getGrade = (score: number) => {
     if (score >= 90) return { grade: "A", color: "text-green-600" };
@@ -513,24 +508,32 @@ export default function TeacherEvaluation({ onNavigate, projectId }: TeacherEval
                         <div className="flex items-center justify-between mb-3">
                           <div>
                             <h4 className="text-blue-900">{rubric.name}</h4>
-                            <p className="text-sm text-gray-600">Bobot: {rubric.weight}%</p>
+                            <p className="text-sm text-gray-600">Skor 1–4</p>
                           </div>
-                          <span className="text-2xl text-blue-600">{scores[rubric.id] ?? rubric.score ?? 0}</span>
+
+                          <div className="text-right">
+                            <span className="text-2xl text-blue-600">{scores[rubric.id] ?? rubric.score ?? 0}</span>
+                            <p className="text-xs text-gray-500">/ 4</p>
+                          </div>
                         </div>
 
-                        <Slider
-                          value={[scores[rubric.id] ?? rubric.score ?? 0]}
-                          onValueChange={(value) =>
+                        <select
+                          value={scores[rubric.id] ?? rubric.score ?? ""}
+                          onChange={(e) =>
                             setScores((prev) => ({
                               ...prev,
-                              [rubric.id]: value[0],
+                              [rubric.id]: Number(e.target.value),
                             }))
                           }
-                          max={100}
-                          step={5}
                           disabled={!detail}
-                          className="mb-4"
-                        />
+                          className="w-full border rounded-md px-3 py-2 text-sm mb-4 bg-white"
+                        >
+                          <option value="">Pilih skor</option>
+                          <option value={4}>4 - Sangat Baik</option>
+                          <option value={3}>3 - Baik</option>
+                          <option value={2}>2 - Cukup</option>
+                          <option value={1}>1 - Kurang</option>
+                        </select>
 
                         <Textarea
                           placeholder="Catatan untuk rubrik ini..."
@@ -553,13 +556,14 @@ export default function TeacherEvaluation({ onNavigate, projectId }: TeacherEval
               <div className="bg-gradient-to-r from-blue-500 to-blue-600 p-6 rounded-lg text-white">
                 <div className="flex items-center justify-between">
                   <div>
-                    <p className="text-sm opacity-90 mb-1">Nilai Total</p>
-                    <h2 className="text-white">{detail ? totalScore : 0}</h2>
+                    <p className="text-sm opacity-90 mb-1">Total Skor</p>
+                    <h2 className="text-white">{detail ? `${totalRawScore}/28` : "0/28"}</h2>
                   </div>
 
                   <div className="text-right">
-                    <p className="text-sm opacity-90 mb-1">Grade</p>
-                    <h2 className="text-white">{detail ? getGrade(totalScore).grade : "-"}</h2>
+                    <p className="text-sm opacity-90 mb-1">Nilai Akhir</p>
+                    <h2 className="text-white">{detail ? totalScore : 0}</h2>
+                    <p className="text-sm opacity-90 mt-1">Grade: {detail ? getGrade(totalScore).grade : "-"}</p>
                   </div>
                 </div>
               </div>

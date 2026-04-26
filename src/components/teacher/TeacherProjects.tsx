@@ -239,20 +239,32 @@ export default function TeacherProjects({ onNavigate, onViewEvaluation }: Teache
       console.error(error);
     }
   };
+  const calculateProjectProgress = (project: any) => {
+    return projectProgressMap[project.id] || 0;
+  };
+
+  const getDisplayStatus = (project: any) => {
+    if (project.status === "completed") return "completed";
+
+    const progress = calculateProjectProgress(project);
+    const groupCount = projectGroupCountMap[project.id] || 0;
+
+    if (groupCount === 0 && progress === 0) return "not_started";
+
+    return "active";
+  };
 
   const filteredProjects = Array.isArray(projects)
     ? projects.filter((project) => {
+        const displayStatus = getDisplayStatus(project);
+
         const matchesSearch = project.title?.toLowerCase().includes(searchQuery.toLowerCase()) || project.class?.toLowerCase().includes(searchQuery.toLowerCase());
 
-        const matchesFilter = filterStatus === "all" || project.status === filterStatus;
+        const matchesFilter = filterStatus === "all" || displayStatus === filterStatus;
 
         return matchesSearch && matchesFilter;
       })
     : [];
-
-  const calculateProjectProgress = (project: any) => {
-    return projectProgressMap[project.id] || 0;
-  };
 
   if (showProgressDetail && selectedGroupForProgress) {
     return <ProjectProgressDetail onBack={() => setShowProgressDetail(false)} groupData={selectedGroupForProgress} projectTitle={selectedGroupForProgress.projectTitle} />;
@@ -316,7 +328,7 @@ export default function TeacherProjects({ onNavigate, onViewEvaluation }: Teache
                 <CheckCircle2 className="w-6 h-6" />
                 <p className="text-sm opacity-90">Proyek Aktif</p>
               </div>
-              <p className="text-4xl mb-1">{projects.filter((p) => p.status === "active").length}</p>
+              <p className="text-4xl mb-1">{projects.filter((p) => getDisplayStatus(p) === "active").length} </p>
               <p className="text-xs opacity-75">Sedang berjalan</p>
             </CardContent>
           </Card>
@@ -449,10 +461,15 @@ export default function TeacherProjects({ onNavigate, onViewEvaluation }: Teache
           {filteredProjects.map((project) => {
             const progress = calculateProjectProgress(project);
             const participantCount = project.type === "group" ? projectGroupCountMap[project.id] || 0 : 1;
+            const displayStatus = getDisplayStatus(project);
 
             return (
               <Card key={project.id} className="border-0 shadow-lg hover:shadow-2xl transition-all cursor-pointer group overflow-hidden" onClick={() => setSelectedProjectDetail(project)}>
-                <div className={`h-2 ${project.status === "active" ? "bg-gradient-to-r from-green-400 to-green-600" : "bg-gradient-to-r from-gray-400 to-gray-600"}`} />
+                <div
+                  className={`h-2 ${
+                    displayStatus === "completed" ? "bg-gradient-to-r from-red-400 to-red-600" : displayStatus === "active" ? "bg-gradient-to-r from-green-400 to-green-600" : "bg-gradient-to-r from-yellow-400 to-yellow-600"
+                  }`}
+                />
 
                 <CardHeader className="pb-4">
                   <div className="flex items-start justify-between mb-3">
@@ -480,7 +497,9 @@ export default function TeacherProjects({ onNavigate, onViewEvaluation }: Teache
                       </div>
                     </div>
 
-                    <Badge className={project.status === "active" ? "bg-green-500" : "bg-gray-500"}>{project.status === "active" ? "Aktif" : "Selesai"}</Badge>
+                    <Badge className={displayStatus === "completed" ? "bg-red-500 hover:bg-red-600 text-white" : displayStatus === "active" ? "bg-green-500 hover:bg-green-600 text-white" : "bg-yellow-500 hover:bg-yellow-600 text-white"}>
+                      {displayStatus === "completed" ? "Akhir" : displayStatus === "active" ? "Aktif" : "Belum Dimulai"}
+                    </Badge>
                   </div>
 
                   <div className="flex items-center gap-4 bg-gradient-to-br from-blue-50 to-white p-4 rounded-lg">

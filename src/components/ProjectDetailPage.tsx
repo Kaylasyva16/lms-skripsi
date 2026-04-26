@@ -55,13 +55,16 @@ type Syntax = {
 };
 
 type ProjectDetailResponse = {
-  project: {
+  finalSubmission?: {
     id: number;
-    title: string;
-    description?: string;
+    fileName: string;
+    fileUrl: string;
+    fileSize?: number;
     status: string;
-    groupName?: string;
-  };
+    finalScore?: number | null;
+    teacherNote?: string | null;
+    submittedAt?: string | null;
+  } | null;
   teamMembers: TeamMember[];
   overallProgress: {
     completed: number;
@@ -105,6 +108,7 @@ export function ProjectDetailPage({ projectId, onClose }: ProjectDetailPageProps
   const [projectDetail, setProjectDetail] = useState<ProjectDetailResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [uploadingFinal, setUploadingFinal] = useState(false);
   const [uploadingStageId, setUploadingStageId] = useState<number | null>(null);
   console.log("PROJECT DETAIL projectId:", projectId);
 
@@ -280,6 +284,43 @@ export function ProjectDetailPage({ projectId, onClose }: ProjectDetailPageProps
     return <div className="p-6 text-sm text-red-500">Detail project tidak ditemukan.</div>;
   }
 
+  const handleFinalSubmit = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    try {
+      setUploadingFinal(true);
+
+      const token = localStorage.getItem("token");
+      const formData = new FormData();
+      formData.append("file", file);
+
+      const res = await fetch(`${API_BASE}/api/student/projects/${projectId}/final-submit`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+        body: formData,
+      });
+
+      const data = await res.json().catch(() => null);
+
+      if (!res.ok) {
+        console.log("FINAL SUBMIT ERROR RESPONSE:", data);
+
+        throw new Error(data?.error || data?.detail || data?.message || "Gagal upload final proyek");
+      }
+
+      alert("File final proyek berhasil dikumpulkan");
+      await fetchDetail();
+      event.target.value = "";
+    } catch (err: any) {
+      alert(err.message || "Gagal upload final proyek");
+    } finally {
+      setUploadingFinal(false);
+    }
+  };
+
   return (
     <div className="space-y-6 pb-8">
       <button onClick={onClose} className="flex items-center gap-2 text-[#155dfc] hover:text-[#0d4acf] transition-colors">
@@ -337,6 +378,30 @@ export function ProjectDetailPage({ projectId, onClose }: ProjectDetailPageProps
           )}
         </CardContent>
       </Card>
+
+      {overallProgress.completed === overallProgress.total && overallProgress.total > 0 && (
+        <Card className="border border-blue-200 bg-blue-50">
+          <CardContent className="pt-5 pb-5">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h3 className="text-base font-medium text-[#1c398e] mb-1">Upload File Final Proyek</h3>
+                <p className="text-sm text-gray-600">Semua tahap sudah selesai. Upload file akhir proyek di sini agar dapat dinilai guru.</p>
+              </div>
+
+              <label className="cursor-pointer flex-shrink-0">
+                <div className="flex items-center gap-2 px-4 py-2 bg-[#2b7fff] text-white rounded-lg hover:bg-blue-700 transition-colors text-sm">
+                  <Upload className="w-4 h-4" />
+                  <span>{uploadingFinal ? "Mengupload..." : "Upload Final"}</span>
+                </div>
+
+                <input type="file" className="hidden" onChange={handleFinalSubmit} accept=".pdf,.doc,.docx,.png,.jpg,.jpeg,.zip" />
+              </label>
+            </div>
+
+            <p className="text-xs text-gray-500 mt-3">Format: PDF, DOC, DOCX, gambar, atau ZIP.</p>
+          </CardContent>
+        </Card>
+      )}
 
       <div className="bg-white rounded-[14px] border border-[rgba(0,0,0,0.1)] p-1">
         <div className="flex gap-1 overflow-x-auto">
@@ -412,6 +477,10 @@ export function ProjectDetailPage({ projectId, onClose }: ProjectDetailPageProps
                     <div>
                       <h4 className="font-medium text-neutral-950 mb-0.5">{stage.title}</h4>
                       <p className="text-sm text-[#4a5565]">{stage.subtitle}</p>
+                      <div className="bg-blue-50/50 border border-blue-100 rounded-md p-3 mt-3">
+                        <p className="text-xs font-medium text-blue-600 mb-1">💡 Instruksi</p>
+                        <p className="text-sm text-gray-700">{stage.instruction}</p>
+                      </div>
                     </div>
                   </div>
 
@@ -470,6 +539,22 @@ export function ProjectDetailPage({ projectId, onClose }: ProjectDetailPageProps
                       </label>
                       <span className="text-xs text-gray-500">PDF, DOC, Gambar, ZIP</span>
                     </div>
+
+                    {projectDetail.project.finalSubmission && (
+                      <div className="mt-4 flex items-center justify-between p-3 bg-white border border-blue-200 rounded-lg">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <FileText className="w-4 h-4 text-[#2b7fff] flex-shrink-0" />
+                          <a href={`${API_BASE}/uploads/${projectDetail.project.finalSubmission.fileUrl}`} target="_blank" rel="noopener noreferrer" className="text-sm text-gray-700 truncate hover:underline">
+                            {projectDetail.project.finalSubmission.fileName}
+                          </a>
+                          <span className="text-xs text-gray-500">({formatBytes(projectDetail.project.finalSubmission.fileSize)})</span>
+                        </div>
+
+                        <Badge variant="outline" className="text-xs">
+                          {projectDetail.project.finalSubmission.status}
+                        </Badge>
+                      </div>
+                    )}
 
                     {stage.files && stage.files.length > 0 && (
                       <div className="space-y-2 mt-3">

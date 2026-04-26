@@ -120,11 +120,11 @@ export function LandingPage({ onNavigate }: LandingPageProps) {
       </section>
 
       {/* 3. CTA Section - Gradient Background */}
-      <section className="relative w-full bg-gradient-to-r from-blue-600 to-purple-600 py-20 overflow-hidden">
-        {/* Subtle Pattern */}
+      <section className="relative w-full bg-gradient-to-br from-blue-500 to-blue-700 py-20 overflow-hidden">
+        {/* Dot Pattern - Biar sama persis kyk Hero */}
         <div className="absolute inset-0 opacity-10">
           <div
-            className="absolute top-0 left-0 w-full h-full"
+            className="w-full h-full"
             style={{
               backgroundImage: "radial-gradient(circle at 2px 2px, white 1px, transparent 0)",
               backgroundSize: "40px 40px",
@@ -135,30 +135,23 @@ export function LandingPage({ onNavigate }: LandingPageProps) {
         <div className="relative max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
           <div className="inline-flex items-center gap-2 bg-white/20 backdrop-blur-sm px-4 py-2 rounded-full mb-6 border border-white/30">
             <Sparkles className="w-5 h-5 text-yellow-300" />
-            <span className="font-medium text-white">Yuk Mulai Sekarang!</span>
+            <span className="font-medium text-white text-sm sm:text-base">Mulai Masa Depanmu di SMK!</span>
           </div>
 
-          <h2 className="text-white mb-6">Siap Jadi Developer Handal? 🚀</h2>
+          <h2 className="text-3xl md:text-5xl font-bold text-white mb-4">
+            Bikin Portofolio <span className="text-yellow-300">Siap Kerja!</span> 💻
+          </h2>
 
-          <p className="text-blue-100 text-xl mb-10 max-w-2xl mx-auto">
-            Gabung bareng <span className="font-bold text-yellow-300">2,500+ siswa</span> yang udah upgrade skill coding mereka.
-            <br />
-            <span className="font-bold text-white">100% GRATIS!</span>
-          </p>
+          <p className="text-blue-100 text-lg mb-8 max-w-xl mx-auto">Belajar coding lewat project riil standar industri. Gratis buat kamu, siswa SMK RPL!</p>
 
-          <div className="flex items-center justify-center gap-4 flex-wrap">
-            <Button size="lg" onClick={() => onNavigate("register")} className="gap-2 bg-white text-blue-600 hover:bg-yellow-300 hover:text-blue-700 px-10 h-14 text-base shadow-2xl">
-              <Rocket className="w-5 h-5" />
-              Daftar Gratis Sekarang
-            </Button>
-            <Button size="lg" variant="outline" onClick={() => onNavigate("about")} className="gap-2 border-2 border-white text-white hover:bg-white/10 h-14 text-base">
-              <MessageCircle className="w-5 h-5" />
-              Tanya-Tanya Dulu
+          <div className="flex items-center justify-center">
+            <Button onClick={() => onNavigate("register")} className="group flex items-center gap-2 bg-white text-blue-600 hover:bg-yellow-300 hover:text-blue-700 px-8 h-14 text-lg font-semibold rounded-xl shadow-md transition-all">
+              Mulai Belajar
+              <ArrowRight className="w-5 h-5 transition-transform group-hover:translate-x-1" />
             </Button>
           </div>
         </div>
       </section>
-
       {/* FOOTER */}
       <footer className="bg-gray-900 text-gray-400 py-10">
         <div className="max-w-7xl mx-auto px-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 sm:gap-8">

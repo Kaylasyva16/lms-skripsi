@@ -230,13 +230,14 @@ export const StudentGradeDetail: React.FC<StudentGradeDetailProps> = ({ studentI
 
                   <div className="space-y-2">
                     {project.phases.map((phase, index) => {
-                      const percentage = Math.round((phase.score / phase.maxScore) * 100);
+                      const phaseMaxScore = Number(phase.maxScore || 4);
+                      const percentage = Math.round((Number(phase.score || 0) / phaseMaxScore) * 100);
                       return (
                         <div key={index}>
                           <div className="flex justify-between text-sm mb-1">
                             <span>{phase.name}</span>
                             <span>
-                              {phase.score}/{phase.maxScore}
+                              {phase.score}/{phaseMaxScore}
                             </span>
                           </div>
                           <div className="w-full h-2 rounded-full bg-gray-200">

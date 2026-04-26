@@ -129,36 +129,23 @@ export function LoginPage({ onLogin, onRegister }: LoginPageProps) {
                 <Input type="password" placeholder="Masukkan password Anda" value={password} onChange={(e) => setPassword(e.target.value)} required />
               </div>
 
-              {/* Demo Mode */}
-              <div className="bg-blue-50 border border-blue-200 rounded-xl p-3">
-                <p className="text-sm font-bold text-blue-900 mb-1 flex items-center gap-2">
-                  <Info className="w-4 h-4" /> Demo Mode
-                </p>
-                <ul className="text-sm space-y-1">
-                  <li className="text-blue-600">• siswa@smk.sch.id</li>
-                  <li className="text-green-600">• guru@smk.sch.id</li>
-                  <li className="text-purple-600">• admin@smk.sch.id</li>
-                </ul>
-                <div className="mt-2 pt-2 border-t border-blue-200 text-sm text-blue-800">
-                  Pass: <span className="font-bold bg-blue-100 px-2 py-0.5 rounded">password</span>
-                </div>
-              </div>
-
               {/* Remember & Forgot */}
-              <div className="flex items-center justify-between">
-                <label className="flex items-center gap-2 cursor-pointer">
-                  <input type="checkbox" className="h-4 w-4 rounded-md border-gray-300 text-blue-600 focus:ring-blue-200" />
-                  <span className="text-sm text-gray-700 font-medium">Ingat saya</span>
-                </label>
-
-                <button type="button" className="text-sm text-blue-600 font-semibold hover:underline" onClick={() => alert("Fitur lupa password belum tersedia")}>
+              <div className="flex justify-end mt-2">
+                <button type="button" className="text-xs text-blue-600 font-semibold hover:underline" onClick={() => alert("Fitur lupa password belum tersedia")}>
                   Lupa password?
                 </button>
               </div>
 
               {/* Login Button */}
-              <Button type="submit" className="w-full h-11 bg-gradient-to-r from-blue-600 via-blue-500 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white font-bold shadow-lg">
-                Masuk <Sparkles className="w-4 h-4 ml-2" />
+              {/* Login Button */}
+              <Button type="submit" disabled={loading} className="w-full h-11 bg-blue-600 hover:bg-blue-700 text-white font-bold shadow-lg transition-all">
+                {loading ? (
+                  "Memproses..."
+                ) : (
+                  <>
+                    Masuk <Sparkles className="w-4 h-4 ml-2" />
+                  </>
+                )}
               </Button>
 
               {/* Divider */}

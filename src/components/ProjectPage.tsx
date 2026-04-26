@@ -68,6 +68,7 @@ export function ProjectPage() {
   const [groupName, setGroupName] = useState("");
   const [savingGroupName, setSavingGroupName] = useState(false);
   const [projectDetail, setProjectDetail] = useState<any>(null);
+  const [hasGroup, setHasGroup] = useState(false);
 
   const fetchProjects = async () => {
     try {
@@ -90,8 +91,11 @@ export function ProjectPage() {
       }
 
       const projectList = Array.isArray(data) ? data : [];
-      setProjects(projectList);
-      setSelectedProject(projectList[0] || null);
+
+      const activeProjects = projectList.filter((project) => project.status === "active");
+
+      setProjects(activeProjects);
+      setSelectedProject(activeProjects[0] || null);
     } catch (error) {
       console.error(error);
       setErrorMessage("Terjadi kesalahan saat mengambil project");
@@ -122,17 +126,22 @@ export function ProjectPage() {
         setTimeout(() => setErrorMessage(""), 3000);
         setMembers([]);
         setGroupName("");
+        setHasGroup(false);
         return;
       }
 
+      const currentGroup = data.group ?? null;
+
       setMembers(Array.isArray(data.members) ? data.members : []);
-      setGroupName(data.group?.groupName || "");
+      setGroupName(currentGroup?.groupName || "");
+      setHasGroup(!!currentGroup);
     } catch (error) {
       console.error(error);
       setErrorMessage("Terjadi kesalahan saat mengambil anggota kelompok");
       setTimeout(() => setErrorMessage(""), 3000);
       setMembers([]);
       setGroupName("");
+      setHasGroup(false);
     } finally {
       setLoadingMembers(false);
     }
@@ -214,6 +223,7 @@ export function ProjectPage() {
       setMembers([]);
       setClassmates([]);
       setGroupName("");
+      setHasGroup(false);
     }
   }, [selectedProject]);
 
@@ -222,6 +232,12 @@ export function ProjectPage() {
 
     if (!groupName.trim()) {
       setErrorMessage("Nama kelompok wajib diisi");
+      setTimeout(() => setErrorMessage(""), 3000);
+      return;
+    }
+
+    if (!hasGroup) {
+      setErrorMessage("Tambahkan anggota terlebih dahulu untuk membuat kelompok");
       setTimeout(() => setErrorMessage(""), 3000);
       return;
     }
@@ -370,7 +386,7 @@ export function ProjectPage() {
     }
   };
 
-  const availableClassmates = classmates.filter((student) => editingMember?.studentId === student.id || !members.some((member) => member.studentId === student.id));
+  const availableClassmates = classmates;
 
   const getStatusLabel = (status?: string) => {
     if (status === "active") return "Sedang Dikerjakan";
@@ -586,13 +602,18 @@ export function ProjectPage() {
                         <SelectTrigger className="w-full h-10">
                           <SelectValue placeholder="Pilih siswa" />
                         </SelectTrigger>
-                        <SelectContent className="bg-white border shadow-md z-50">
+                        <SelectContent className="bg-white border shadow-md z-50 max-h-72 overflow-y-auto">
                           {availableClassmates.length > 0 ? (
-                            availableClassmates.map((student) => (
-                              <SelectItem key={student.id} value={String(student.id)} className="hover:bg-blue-100 focus:bg-blue-100 cursor-pointer">
-                                {student.nama} - {student.nis}
-                              </SelectItem>
-                            ))
+                            availableClassmates.map((student) => {
+                              const isAlreadyInGroup = members.some((member) => member.studentId === student.id) && editingMember?.studentId !== student.id;
+
+                              return (
+                                <SelectItem key={student.id} value={String(student.id)} disabled={isAlreadyInGroup} className={isAlreadyInGroup ? "opacity-50 cursor-not-allowed" : "hover:bg-blue-100 focus:bg-blue-100 cursor-pointer"}>
+                                  {student.nama} - {student.nis}
+                                  {isAlreadyInGroup ? " (Sudah di kelompok)" : ""}
+                                </SelectItem>
+                              );
+                            })
                           ) : (
                             <SelectItem value="empty" disabled>
                               Tidak ada siswa tersedia
@@ -667,7 +688,7 @@ export function ProjectPage() {
               <Label className="block mb-2">Nama Kelompok</Label>
               <div className="flex gap-2 max-w-md">
                 <input type="text" value={groupName} onChange={(e) => setGroupName(e.target.value)} placeholder="Masukkan nama kelompok" className="flex-1 h-10 rounded-md border border-gray-300 px-3 text-sm" />
-                <Button onClick={handleSaveGroupName} disabled={savingGroupName} className="bg-blue-500 hover:bg-blue-600">
+                <Button onClick={handleSaveGroupName} disabled={savingGroupName || !hasGroup} className="bg-blue-500 hover:bg-blue-600">
                   {savingGroupName ? "Menyimpan..." : "Simpan"}
                 </Button>
               </div>

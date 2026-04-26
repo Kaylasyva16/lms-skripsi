@@ -62,13 +62,13 @@ export function MaterialDetailPage({ onClose }: MaterialDetailPageProps) {
     try {
       setLoading(true);
 
-      const user = JSON.parse(localStorage.getItem("user") || "{}");
-      const siswaId = user.id;
+      const token = localStorage.getItem("token");
 
-      console.log("USER LOGIN:", user);
-      console.log("SISWA ID MATERI:", siswaId);
-
-      const res = await axios.get(`http://localhost:5000/api/courses/1/modules?siswaId=${siswaId}`);
+      const res = await axios.get("http://localhost:5000/api/courses/1/modules", {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
 
       const rawModules = res.data;
 
@@ -100,7 +100,6 @@ export function MaterialDetailPage({ onClose }: MaterialDetailPageProps) {
       setLoading(false);
     }
   };
-
   useEffect(() => {
     fetchModules();
   }, []);

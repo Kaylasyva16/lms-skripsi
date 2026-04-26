@@ -66,6 +66,52 @@ export default function StudentDashboard({ onNavigate, user }: StudentDashboardP
   const [weeklyActivity, setWeeklyActivity] = useState<WeeklyActivityItem[]>([]);
   const [loadingWeeklyActivity, setLoadingWeeklyActivity] = useState(true);
 
+  const [totalMateri, setTotalMateri] = useState(0);
+
+  const [progressData, setProgressData] = useState({
+    total: 0,
+    complete: 0,
+  });
+
+  const inProgress = Math.max(progressData.total - progressData.complete, 0);
+
+  const fetchMateriSummary = async () => {
+    try {
+      const token = localStorage.getItem("token");
+
+      const res = await fetch("http://localhost:5000/api/courses/1/modules", {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        throw new Error(data.message || "Gagal mengambil summary materi");
+      }
+
+      const modules = Array.isArray(data) ? data : [];
+
+      const total = modules.reduce((sum, item) => sum + Number(item.total_materials ?? 0), 0);
+
+      const complete = modules.reduce((sum, item) => sum + Number(item.completed_materials ?? 0), 0);
+
+      setTotalMateri(total);
+      setProgressData({
+        total,
+        complete,
+      });
+    } catch (err) {
+      console.error("FETCH MATERI SUMMARY ERROR:", err);
+      setTotalMateri(0);
+      setProgressData({
+        total: 0,
+        complete: 0,
+      });
+    }
+  };
+
   useEffect(() => {
     const token = localStorage.getItem("token");
 
@@ -73,6 +119,8 @@ export default function StudentDashboard({ onNavigate, user }: StudentDashboardP
       window.location.href = "/login";
       return;
     }
+
+    if (!user?.id) return;
 
     const fetchLatestActivities = async () => {
       try {
@@ -203,12 +251,13 @@ export default function StudentDashboard({ onNavigate, user }: StudentDashboardP
       }
     };
 
+    fetchMateriSummary();
     fetchWeeklyActivity();
     fetchLatestActivities();
     fetchRecentLearning();
     fetchPerformance();
     fetchLearningDistribution();
-  }, []);
+  }, [user?.id]);
 
   return (
     <div className="space-y-6 bg-gradient-to-br from-blue-50 to-indigo-50 p-6 rounded-xl">
@@ -241,7 +290,7 @@ export default function StudentDashboard({ onNavigate, user }: StudentDashboardP
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm text-gray-600 mb-1">Total Materi</p>
-                <p className="text-blue-900">6 Materi</p>
+                <p className="text-blue-900">{totalMateri} Materi</p>
               </div>
               <div className="w-12 h-12 bg-blue-100 rounded-full flex items-center justify-center">
                 <BookOpen className="w-6 h-6 text-blue-500" />
@@ -255,7 +304,7 @@ export default function StudentDashboard({ onNavigate, user }: StudentDashboardP
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm text-gray-600 mb-1">Selesai</p>
-                <p className="text-blue-900">1 Materi</p>
+                <p className="text-blue-900">{progressData.complete} Materi</p>
               </div>
               <div className="w-12 h-12 bg-green-100 rounded-full flex items-center justify-center">
                 <CheckCircle2 className="w-6 h-6 text-green-500" />
@@ -269,7 +318,7 @@ export default function StudentDashboard({ onNavigate, user }: StudentDashboardP
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm text-gray-600 mb-1">Dalam Progress</p>
-                <p className="text-blue-900">2 Materi</p>
+                <p className="text-blue-900">{inProgress} Materi</p>
               </div>
               <div className="w-12 h-12 bg-orange-100 rounded-full flex items-center justify-center">
                 <Clock className="w-6 h-6 text-orange-500" />
