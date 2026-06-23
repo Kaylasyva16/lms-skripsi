@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Avatar, AvatarFallback, AvatarImage } from "./ui/avatar";
-import { TrendingUp, CheckCircle2, BookOpen, Clock, Calendar, AlertCircle } from "lucide-react";
+import { TrendingUp, CheckCircle2, BookOpen, Clock, Calendar, AlertCircle, Target, List, ChevronDown } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Cell, PieChart, Pie } from "recharts";
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from "./ui/chart";
 
@@ -47,6 +47,21 @@ interface StudentDashboardProps {
   user: any;
 }
 
+interface LearningIndicator {
+  id: number;
+  indicator_text: string;
+  sort_order: number;
+}
+
+interface LearningObjective {
+  cp_code: string;
+  cp_title: string;
+  cp_description: string;
+  tp_title: string;
+  tp_description: string;
+  indicators: LearningIndicator[];
+}
+
 export default function StudentDashboard({ onNavigate, user }: StudentDashboardProps) {
   const [latestActivities, setLatestActivities] = useState<LatestActivityItem[]>([]);
   const [loadingActivities, setLoadingActivities] = useState(true);
@@ -67,6 +82,10 @@ export default function StudentDashboard({ onNavigate, user }: StudentDashboardP
   const [loadingWeeklyActivity, setLoadingWeeklyActivity] = useState(true);
 
   const [totalMateri, setTotalMateri] = useState(0);
+
+  const [showIndicators, setShowIndicators] = useState(false);
+  const [learningObjective, setLearningObjective] = useState<LearningObjective | null>(null);
+  const [loadingLearningObjective, setLoadingLearningObjective] = useState(true);
 
   const [progressData, setProgressData] = useState({
     total: 0,
@@ -259,8 +278,51 @@ export default function StudentDashboard({ onNavigate, user }: StudentDashboardP
     fetchLearningDistribution();
   }, [user?.id]);
 
+  useEffect(() => {
+    const fetchLearningObjective = async () => {
+      try {
+        setLoadingLearningObjective(true);
+
+        const token = localStorage.getItem("token");
+
+        if (!token) {
+          return;
+        }
+
+        const res = await fetch("http://localhost:5000/api/courses/1/learning-objectives", {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        });
+
+        const data = await res.json();
+
+        if (!res.ok) {
+          throw new Error(data.message || "Gagal mengambil capaian pembelajaran");
+        }
+
+        setLearningObjective({
+          cp_code: data.cp_code || "CP 3.2",
+          cp_title: data.cp_title || "Capaian Pembelajaran",
+          cp_description: data.cp_description || "",
+          tp_title: data.tp_title || "Tujuan Pembelajaran",
+          tp_description: data.tp_description || "",
+          indicators: Array.isArray(data.indicators) ? data.indicators : [],
+        });
+      } catch (err) {
+        console.error("FETCH STUDENT LEARNING OBJECTIVE ERROR:", err);
+        setLearningObjective(null);
+      } finally {
+        setLoadingLearningObjective(false);
+      }
+    };
+
+    fetchLearningObjective();
+  }, []);
+
   return (
     <div className="space-y-6 bg-gradient-to-br from-blue-50 to-indigo-50 p-6 rounded-xl">
+      {/* CARD SELAMAT DATANG */}
       <div className="flex items-center gap-4 bg-gradient-to-r from-blue-500 to-blue-600 rounded-xl p-6 text-white shadow-lg">
         <Avatar className="w-16 h-16 border-4 border-white">
           <AvatarImage src="" />
@@ -283,6 +345,78 @@ export default function StudentDashboard({ onNavigate, user }: StudentDashboardP
           </p>
         </div>
       </div>
+
+      {/* CAPAIAN & TUJUAN PEMBELAJARAN */}
+      <div className="w-full overflow-hidden rounded-xl bg-white border border-blue-200 shadow-sm">
+        <div className="bg-gradient-to-r from-blue-50 via-indigo-50 to-purple-50 px-5 py-4">
+          <h3 className="text-xl text-blue-900 mb-1">Capaian & Tujuan Pembelajaran</h3>
+          <p className="text-sm text-gray-600">Percabangan dan Perulangan Pemrograman Terstruktur</p>
+        </div>
+
+        <div className="p-5 space-y-4">
+          <div className="rounded-lg border border-blue-200 bg-blue-50/40 p-4">
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-full bg-blue-500 flex items-center justify-center shrink-0">
+                <BookOpen className="w-5 h-5 text-white" />
+              </div>
+
+              <div>
+                <div className="flex items-center gap-3 mb-2">
+                  <span className="px-3 py-1 rounded-md bg-blue-600 text-white text-xs">{learningObjective?.cp_code || "CP"}</span>
+
+                  <h4 className="text-lg text-blue-800">{learningObjective?.cp_title || "Capaian Pembelajaran"}</h4>
+                </div>
+
+                <p className="text-sm text-gray-700 leading-7">{loadingLearningObjective ? "Memuat capaian pembelajaran..." : learningObjective?.cp_description || "Belum ada capaian pembelajaran."}</p>
+              </div>
+            </div>
+          </div>
+
+          <div className="rounded-lg border border-purple-200 bg-purple-50/40 p-4">
+            <div className="flex items-start gap-3">
+              <div className="w-10 h-10 rounded-full bg-purple-500 flex items-center justify-center shrink-0">
+                <Target className="w-5 h-5 text-white" />
+              </div>
+
+              <div>
+                <h4 className="text-lg text-purple-700 mb-2">{learningObjective?.tp_title || "Tujuan Pembelajaran"}</h4>
+
+                <p className="text-sm text-gray-700 leading-7">{loadingLearningObjective ? "Memuat tujuan pembelajaran..." : learningObjective?.tp_description || "Belum ada tujuan pembelajaran."}</p>
+              </div>
+            </div>
+          </div>
+
+          <button type="button" onClick={() => setShowIndicators(!showIndicators)} className="w-full rounded-lg border border-purple-200 bg-purple-50/50 px-4 py-3 flex items-center justify-between hover:bg-purple-100/60 transition-all">
+            <div className="flex items-center gap-2">
+              <List className="w-5 h-5 text-purple-600" />
+              <span className="text-base text-purple-800">Indikator Tujuan Pembelajaran</span>
+              <span className="px-3 py-1 rounded-full bg-purple-200 text-purple-800 text-xs">{learningObjective?.indicators?.length || 0} Indikator</span>
+            </div>
+
+            <ChevronDown className={`w-5 h-5 text-purple-600 transition-transform ${showIndicators ? "rotate-180" : ""}`} />
+          </button>
+
+          {showIndicators && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              {loadingLearningObjective ? (
+                <p className="text-sm text-gray-500">Memuat indikator...</p>
+              ) : learningObjective?.indicators?.length === 0 ? (
+                <p className="text-sm text-gray-500">Belum ada indikator tujuan pembelajaran.</p>
+              ) : (
+                learningObjective?.indicators.map((indicator, index) => (
+                  <div key={indicator.id || index} className="rounded-lg border border-gray-200 bg-white p-3 flex items-start gap-3">
+                    <div className="w-6 h-6 rounded-full bg-purple-100 text-purple-700 flex items-center justify-center text-xs shrink-0">{index + 1}</div>
+
+                    <p className="text-sm text-gray-700 leading-6">{indicator.indicator_text}</p>
+                  </div>
+                ))
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* CARD TOTAL MATERI, SELESAI, DALAM PROGRESS */}
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <Card className="hover:shadow-lg transition-shadow">

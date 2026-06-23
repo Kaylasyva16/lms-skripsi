@@ -250,6 +250,155 @@ app.put("/guru/:id", authenticateToken, authorizeRole(["admin"]), async (req, re
   }
 });
 
+app.put("/api/guru/courses/:courseId/learning-objectives", authenticateToken, authorizeRole(["admin", "guru"]), async (req, res) => {
+  const client = await pool.connect();
+
+  try {
+    const { courseId } = req.params;
+
+    const { cp_code, cp_title, cp_description, tp_title, tp_description, indicators } = req.body;
+
+    if (!cp_description || !tp_description) {
+      return res.status(400).json({
+        message: "Capaian pembelajaran dan tujuan pembelajaran wajib diisi",
+      });
+    }
+
+    if (!Array.isArray(indicators) || indicators.length === 0) {
+      return res.status(400).json({
+        message: "Indikator tujuan pembelajaran wajib diisi",
+      });
+    }
+
+    await client.query("BEGIN");
+
+    const objectiveResult = await client.query(
+      `
+        INSERT INTO course_learning_objectives (
+          course_id,
+          cp_code,
+          cp_title,
+          cp_description,
+          tp_title,
+          tp_description,
+          updated_by,
+          updated_at
+        )
+        VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
+        ON CONFLICT (course_id)
+        DO UPDATE SET
+          cp_code = EXCLUDED.cp_code,
+          cp_title = EXCLUDED.cp_title,
+          cp_description = EXCLUDED.cp_description,
+          tp_title = EXCLUDED.tp_title,
+          tp_description = EXCLUDED.tp_description,
+          updated_by = EXCLUDED.updated_by,
+          updated_at = NOW()
+        RETURNING *
+        `,
+      [courseId, cp_code || "CP 3.2", cp_title || "Capaian Pembelajaran", cp_description, tp_title || "Tujuan Pembelajaran", tp_description, req.user?.id || null]
+    );
+
+    const objective = objectiveResult.rows[0];
+
+    await client.query(
+      `
+        DELETE FROM course_learning_indicators
+        WHERE learning_objective_id = $1
+        `,
+      [objective.id]
+    );
+
+    for (let i = 0; i < indicators.length; i++) {
+      const indicatorText = typeof indicators[i] === "string" ? indicators[i] : indicators[i]?.indicator_text;
+
+      if (!indicatorText) continue;
+
+      await client.query(
+        `
+          INSERT INTO course_learning_indicators (
+            learning_objective_id,
+            indicator_text,
+            sort_order
+          )
+          VALUES ($1, $2, $3)
+          `,
+        [objective.id, indicatorText, i + 1]
+      );
+    }
+
+    await client.query("COMMIT");
+
+    res.json({
+      message: "Capaian pembelajaran berhasil disimpan",
+      data: objective,
+    });
+  } catch (err) {
+    await client.query("ROLLBACK");
+
+    console.error("UPDATE LEARNING OBJECTIVES ERROR:", err);
+
+    res.status(500).json({
+      message: "Gagal menyimpan capaian pembelajaran",
+      error: err.message,
+    });
+  } finally {
+    client.release();
+  }
+});
+
+app.get("/api/courses/:courseId/learning-objectives", authenticateToken, async (req, res) => {
+  try {
+    const { courseId } = req.params;
+
+    const objectiveResult = await pool.query(
+      `
+      SELECT *
+      FROM course_learning_objectives
+      WHERE course_id = $1
+      LIMIT 1
+      `,
+      [courseId]
+    );
+
+    if (objectiveResult.rows.length === 0) {
+      return res.json({
+        id: null,
+        course_id: Number(courseId),
+        cp_code: "CP 3.2",
+        cp_title: "Capaian Pembelajaran",
+        cp_description: "",
+        tp_title: "Tujuan Pembelajaran",
+        tp_description: "",
+        indicators: [],
+      });
+    }
+
+    const objective = objectiveResult.rows[0];
+
+    const indicatorsResult = await pool.query(
+      `
+      SELECT id, indicator_text, sort_order
+      FROM course_learning_indicators
+      WHERE learning_objective_id = $1
+      ORDER BY sort_order ASC
+      `,
+      [objective.id]
+    );
+
+    res.json({
+      ...objective,
+      indicators: indicatorsResult.rows,
+    });
+  } catch (err) {
+    console.error("GET LEARNING OBJECTIVES ERROR:", err);
+    res.status(500).json({
+      message: "Gagal mengambil capaian pembelajaran",
+      error: err.message,
+    });
+  }
+});
+
 // DASHBOARD GURU //
 app.get("/dashboard/guru", authenticateToken, authorizeRole(["guru"]), async (req, res) => {
   try {

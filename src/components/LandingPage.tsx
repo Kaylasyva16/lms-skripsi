@@ -42,8 +42,10 @@ export function LandingPage({ onNavigate }: LandingPageProps) {
               </motion.div>
 
               <h1 className="text-3xl sm:text-4xl md:text-5xl lg:text-6xl font-bold mb-6 leading-tight">
-                Belajar Coding Nggak Harus <br />
-                <span className="text-yellow-300">Ribet</span> 🚀
+                Belajar Coding Tidak <br />
+                <span className="whitespace-nowrap">
+                  Harus <span className="text-yellow-300">Ribet</span> 🚀
+                </span>
               </h1>
 
               <p className="text-base sm:text-lg text-blue-100 mb-8 max-w-lg">Belajar, latihan, dan bikin project dengan cara yang simpel dan terarah.</p>
@@ -139,7 +141,7 @@ export function LandingPage({ onNavigate }: LandingPageProps) {
           </div>
 
           <h2 className="text-3xl md:text-5xl font-bold text-white mb-4">
-            Bikin Portofolio <span className="text-yellow-300">Siap Kerja!</span> 💻
+            Bikin Portofolio <span className="text-yellow-300">Kamu!</span>
           </h2>
 
           <p className="text-blue-100 text-lg mb-8 max-w-xl mx-auto">Belajar coding lewat project riil standar industri. Gratis buat kamu, siswa SMK RPL!</p>

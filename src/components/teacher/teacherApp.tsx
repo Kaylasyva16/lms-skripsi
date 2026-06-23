@@ -10,6 +10,7 @@ import TeacherEvaluation from "./TeacherEvaluation";
 import EssayGrading from "./EssayGrading";
 import StudentEssayDetail from "./StudentEssayDetail";
 import StudentGradeDetail from "./StudentGradeDetail";
+import TeacherLearningObjectives from "./TeacherLearningObjectives";
 
 interface StudentSubmission {
   id: string;
@@ -25,7 +26,17 @@ interface StudentSubmission {
   totalScore?: number;
 }
 
-export type TeacherPage = "teacher-dashboard" | "teacher-materials" | "teacher-quiz" | "teacher-projects" | "teacher-grades" | "teacher-evaluation" | "essay-grading" | "student-essay-detail" | "student-detail";
+export type TeacherPage =
+  | "teacher-dashboard"
+  | "teacher-materials"
+  | "teacher-quiz"
+  | "teacher-projects"
+  | "teacher-grades"
+  | "teacher-evaluation"
+  | "essay-grading"
+  | "student-essay-detail"
+  | "student-detail"
+  | "teacher-learning-objectives";
 
 export default function TeacherApp() {
   const [currentPage, setCurrentPage] = useState<TeacherPage>("teacher-dashboard");
@@ -93,6 +104,9 @@ export default function TeacherApp() {
     switch (currentPage) {
       case "teacher-dashboard":
         return <TeacherDashboard onNavigate={setCurrentPage} user={user} />;
+
+      case "teacher-learning-objectives":
+        return <TeacherLearningObjectives onNavigate={setCurrentPage} />;
 
       case "teacher-materials":
         return <TeacherMaterials onNavigate={setCurrentPage} />;
